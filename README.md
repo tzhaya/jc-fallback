@@ -27,6 +27,7 @@ JAIRO Cloud が停止している間の応急手段として作成しました�
 | `test_wb_fulltext_csv.py` | オフラインテスト（ネットワーク不使用） |
 | `viewer.html` | CSV を表示し、入力した文字列で絞り込む静的ページ |
 | `result.csv` | 出力例（`viewer.html` が読み込む既定のファイル名）国際農研機関リポジトリのデータです |
+| `docs/` | GitHub Pages の公開内容（`index.html` と、`sample/` のサンプル） |
 
 ## 使い方
 
@@ -101,6 +102,9 @@ PDF ファイルごとに1行を出力します。
 
 1. 任意の Web サーバー（機関のWebサーバや GitHub Pages など）に、`viewer.html` と出力した CSV を同じフォルダに置きます。CSVファイルのファイル名は `result.csv` にします。
 2. `viewer.html` を開くと、同じ場所の `result.csv` を自動で読み込みます。
+
+国際農研のデータを使ったサンプルを、GitHub Pages で公開しています。
+https://tzhaya.github.io/jc-fallback/sample/view.html
 
 手元で試すときは、CSV のあるフォルダで簡易サーバーを起動します。
 

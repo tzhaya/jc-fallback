@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JAIRO Cloud メタデータ取得・検索ツール</title>
+<meta name="description" content="機関リポジトリの本文 PDF が Wayback Machine に保存されているかを調べ、CSV に出力するツールと、その CSV を検索する静的ページです。">
+<style>
+/* デザイントークンは @digital-go-jp/design-tokens 2.1.0 の値 */
+:root {
+  --blue-50: #e8f1fe;
+  --blue-900: #0017c1;
+  --blue-1000: #00118f;
+  --purple-900: #5109ad;
+  --gray-50: #f2f2f2;
+  --gray-100: #e6e6e6;
+  --gray-420: #949494;
+  --gray-536: #767676;
+  --gray-800: #333333;
+  --gray-900: #1a1a1a;
+  --orange-800: #c74700;
+  --yellow-300: #ffd43d;
+  --white: #fff;
+  --black: #000;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+
+body {
+  margin: 0;
+  background: var(--white);
+  color: var(--gray-900);
+  font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+}
+
+a { color: var(--blue-1000); text-underline-offset: 0.17em; text-decoration-thickness: 1px; }
+a:visited { color: var(--purple-900); }
+a:hover { color: var(--blue-900); text-decoration-thickness: 3px; }
+
+/* フォーカスは黄色と黒の二重表示（DADS の方針） */
+:focus-visible {
+  outline: 4px solid var(--yellow-300);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--black);
+  border-radius: 4px;
+}
+
+.container { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -80px;
+  padding: 8px 16px;
+  background: var(--white);
+  z-index: 10;
+}
+.skip-link:focus { top: 8px; }
+
+header.site { border-bottom: 1px solid var(--gray-420); padding: 24px 0; }
+header.site h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+header.site p { margin: 8px 0 0; color: var(--gray-800); }
+
+nav.toc { background: var(--gray-50); border-bottom: 1px solid var(--gray-100); }
+nav.toc ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin: 0;
+  padding: 8px 0;
+  list-style: none;
+}
+nav.toc a { display: inline-block; padding: 4px 0; }
+
+main { padding: 32px 0 48px; }
+
+section { margin-bottom: 48px; }
+h2 {
+  margin: 0 0 16px;
+  padding-bottom: 8px;
+  font-size: 28px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  border-bottom: 2px solid var(--blue-900);
+}
+h3 { margin: 32px 0 8px; font-size: 20px; line-height: 1.5; }
+p { margin: 0 0 16px; }
+ul, ol { margin: 0 0 16px; padding-left: 1.5em; }
+li { margin-bottom: 8px; }
+
+/* 主な導線（サンプルを開くボタン） */
+.button {
+  display: inline-block;
+  min-height: 48px;
+  padding: 8px 24px;
+  font-weight: 700;
+  line-height: 1.7;
+  color: var(--white);
+  background: var(--blue-900);
+  border: 1px solid var(--blue-900);
+  border-radius: 8px;
+  text-decoration: underline;
+  text-underline-offset: 0.17em;
+}
+.button:visited { color: var(--white); }
+.button:hover { color: var(--white); background: var(--blue-1000); border-color: var(--blue-1000); text-decoration-thickness: 3px; }
+.actions { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 24px; }
+
+/* 注意事項 */
+.notice {
+  margin: 0 0 16px;
+  padding: 16px 24px;
+  border: 1px solid var(--gray-420);
+  border-left: 8px solid var(--orange-800);
+  border-radius: 8px;
+  background: var(--white);
+}
+.notice ul { margin: 0; }
+.notice li:last-child { margin-bottom: 0; }
+
+.disclaimer { padding: 16px 24px; background: var(--gray-50); border-radius: 8px; }
+.disclaimer p:last-child { margin-bottom: 0; }
+
+code {
+  padding: 0 4px;
+  font-family: "Noto Sans Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--gray-50);
+  border-radius: 4px;
+  word-break: break-word;
+}
+pre {
+  margin: 0 0 16px;
+  padding: 16px;
+  overflow-x: auto;
+  background: var(--gray-900);
+  color: var(--white);
+  border-radius: 8px;
+  line-height: 1.6;
+}
+pre code { padding: 0; background: none; color: inherit; font-size: 14px; word-break: normal; }
+pre:focus-visible { outline-offset: 2px; }
+
+.table-wrap { overflow-x: auto; margin-bottom: 16px; border: 1px solid var(--gray-420); border-radius: 8px; }
+table { width: 100%; min-width: 560px; border-collapse: collapse; }
+th, td { padding: 12px 16px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--gray-100); }
+thead th { background: var(--gray-50); border-bottom: 1px solid var(--gray-420); font-size: 14px; line-height: 1.5; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+td.wrap-first:first-child { white-space: normal; }
+
+footer { border-top: 1px solid var(--gray-420); padding: 24px 0; font-size: 14px; color: var(--gray-800); }
+footer p { margin: 0 0 4px; }
+
+@media (max-width: 640px) {
+  header.site h1 { font-size: 24px; }
+  h2 { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main">本文へ移動</a>
+
+<header class="site">
+  <div class="container">
+    <h1>JAIRO Cloud メタデータ取得・検索ツール</h1>
+    <p>JAIRO Cloud が停止している間の応急手段として作成した、機関リポジトリの本文 PDF の保存状況を調べるツールです。</p>
+    <div class="actions">
+      <a class="button" href="sample/view.html">サンプルを開く</a>
+      <a href="https://github.com/tzhaya/jc-fallback">GitHub のリポジトリ</a>
+    </div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="ページ内の目次">
+  <div class="container">
+    <ul>
+      <li><a href="#about">概要</a></li>
+      <li><a href="#notes">ご注意</a></li>
+      <li><a href="#usage">使い方</a></li>
+      <li><a href="#columns">取得する情報</a></li>
+      <li><a href="#viewer">viewer.html の設置</a></li>
+      <li><a href="#license">ライセンス</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main id="main" class="container">
+
+  <section id="about">
+    <h2>概要</h2>
+    <p>機関リポジトリから IRDB にハーベストされたメタデータを取得します。</p>
+    <p>このデータを元に、本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、CSV ファイルに出力します。
+    出力した CSV ファイルは、静的な HTML ページ（<code>viewer.html</code>）で簡易ですが検索できます。</p>
+    <p>Python の標準ライブラリだけで動作し、追加のインストールは要りません。</p>
+  </section>
+
+  <section id="notes">
+    <h2>ご注意</h2>
+    <div class="notice">
+      <ul>
+        <li>元の機関リポジトリ上のすべての PDF ファイルが Wayback Machine に保存されている保証はありません。保存されるのはクローラが到達したものだけです。</li>
+        <li>ランディングページが Wayback Machine に保存されていても、PDF ファイルは保存されていないことがあります。</li>
+        <li>新しく登録されたアイテムほど保存されていない傾向があります。</li>
+        <li>国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% が Wayback Machine に保存されていました。レコード番号が 2000900 未満のアイテムでは 95%、2000900 以上では 42% が保存されているなど、最近のアイテムが保存されていないようでした。</li>
+        <li>提供されているファイルのライセンスやメタデータの詳細は、IRDB 上でご確認ください。</li>
+        <li>取得した PDF の再公開及び他機関への提供は、元のファイルのライセンスに従ってください。Internet Archive の利用条件と、IRDB 上のメタデータに記述されたライセンス情報、また提供機関に確認してください。</li>
+      </ul>
+    </div>
+
+    <h3>免責事項</h3>
+    <div class="disclaimer">
+      <p>プログラムの動作確認等は作者によって行っておりますが、万全であることは保証できません。また、数万件単位など、大量のデータ取得についてはテストを行っていません。</p>
+      <p>ご利用とその結果については、利用者の責任において行ってください。作者はその責を負いません。</p>
+    </div>
+  </section>
+
+  <section id="usage">
+    <h2>使い方</h2>
+    <p>Python 3 が必要です。次のコマンドで、対象リポジトリのホスト名を指定して実行します。</p>
+    <pre tabindex="0"><code>WB_CONTACT="連絡先メールアドレス(任意)" python wb_fulltext_csv.py --host jircas.repo.nii.ac.jp --out result.csv</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">オプション</th><th scope="col">内容</th></tr></thead>
+        <tbody>
+          <tr><td><code>--host</code></td><td>対象リポジトリのホスト名（必須）</td></tr>
+          <tr><td><code>--query</code></td><td>IRDB OpenSearch の <code>q</code>（既定: <code>--host</code> と同じ）</td></tr>
+          <tr><td><code>--out</code></td><td>出力する CSV（既定: <code>wayback_fulltext.csv</code>）</td></tr>
+          <tr><td><code>--bulk</code></td><td><code>/record/</code> 配下を一括で分割取得して突き合わせる（アイテムが多いときに推奨）</td></tr>
+          <tr><td><code>--limit N</code></td><td>動作確認用に先頭 N 件だけ処理する</td></tr>
+          <tr><td><code>--refresh</code></td><td>IRDB の一覧を取り直す</td></tr>
+          <tr><td><code>--cache-dir</code></td><td>キャッシュの保存先（既定: <code>.wb_cache</code>）</td></tr>
+          <tr><td><code>--interval</code></td><td>リクエスト間隔の秒数（既定: 1.0）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>処理は次の順に進みます。</p>
+    <ol>
+      <li>IRDB の <a href="https://support.irdb.nii.ac.jp/ja/about/manual/opensearch">OpenSearch API</a> で、対象ホストのアイテムを列挙します。</li>
+      <li>本文 URL を Wayback Machine の CDX API に照会します。</li>
+      <li>PDF ごとに、最新の保存を選びます。</li>
+    </ol>
+    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば取得済みの分は再利用されます。</p>
+    <p>Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待って再試行します。CDX の応答には、1回あたり20〜60秒かかることがあります。</p>
+  </section>
+
+  <section id="columns">
+    <h2>取得する情報</h2>
+    <p>PDF ファイルごとに1行を出力します。保存が見つからないアイテムは、状態だけを書いた1行になります。</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">列</th><th scope="col">内容</th></tr></thead>
+        <tbody>
+          <tr><td class="wrap-first"><code>status</code></td><td><code>ok</code>（PDF の保存を確認）/ <code>no_capture</code>（保存なし）/ <code>no_pdf</code>（PDF 以外のみ、または無効な記録）/ <code>cdx_error</code>（照会に失敗）</td></tr>
+          <tr><td class="wrap-first"><code>title</code>, <code>issn</code>, <code>publicationName</code>, <code>volume</code>, <code>number</code>, <code>startingPage</code>, <code>endingPage</code>, <code>publicationDate</code></td><td>IRDB のメタデータ</td></tr>
+          <tr><td><code>updated</code></td><td>IRDB の更新日（個別の登録日ではありません）</td></tr>
+          <tr><td class="wrap-first"><code>irdb_url</code>, <code>record_url</code>, <code>record_id</code></td><td>IRDB の詳細ページ、リポジトリの詳細ページ、レコード番号</td></tr>
+          <tr><td><code>file_url</code></td><td>本文 PDF の元の URL</td></tr>
+          <tr><td class="wrap-first"><code>capture_timestamp</code>, <code>capture_date</code></td><td>最新の保存日時と日付</td></tr>
+          <tr><td class="wrap-first"><code>mimetype</code>, <code>length</code></td><td>CDX の値（参考。PDF でも <code>mimetype</code> が <code>application/octet-stream</code> になることがあります）</td></tr>
+          <tr><td><code>n_captures</code></td><td>そのファイルの保存回数</td></tr>
+          <tr><td><code>item_files_captured</code></td><td>そのアイテムで保存を確認できた PDF の数</td></tr>
+          <tr><td><code>archive_url</code></td><td>Wayback Machine 上の PDF ファイルの URL（<code>…/web/{timestamp}id_/{original}</code>）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul>
+      <li>複数ファイルのうち一部だけが保存されている場合でも、<code>ok</code> になります。ファイルの不足は検出できません。</li>
+      <li><code>capture_date</code> は Wayback が最後に取得した日です。その後にリポジトリ側で差し替えられた場合は、反映されていません。</li>
+    </ul>
+  </section>
+
+  <section id="viewer">
+    <h2>viewer.html の設置</h2>
+    <p><code>viewer.html</code> は、CSV を表示してテキストボックスの入力で絞り込む単体のページです。外部のライブラリは使いません。</p>
+    <ol>
+      <li>任意の Web サーバー（機関の Web サーバーや GitHub Pages など）に、<code>viewer.html</code> と出力した CSV を同じフォルダに置きます。CSV のファイル名は <code>result.csv</code> にします。</li>
+      <li><code>viewer.html</code> を開くと、同じ場所の <code>result.csv</code> を自動で読み込みます。</li>
+    </ol>
+    <p><code>viewer.html</code> をファイルとして直接開いた場合は、ブラウザの制限により CSV を自動では読み込めません。画面の「CSV ファイルを選択」から選ぶか、ドラッグ&amp;ドロップで渡してください。ファイルは端末の中だけで処理され、送信されません。</p>
+    <p>国際農研のデータを使ったサンプルを、<a href="sample/view.html">このサイトで公開しています</a>。</p>
+  </section>
+
+  <section id="license">
+    <h2>ライセンス</h2>
+    <p><a href="https://creativecommons.org/publicdomain/zero/1.0/deed.ja">CC0 1.0 Universal</a>（パブリックドメイン提供）。</p>
+
+    <h3>AI の利用</h3>
+    <p>このアプリケーションの作成や更新では、生成 AI によるコーディング支援を利用しています。</p>
+
+    <h3>作者</h3>
+    <ul>
+      <li>Takanori Hayashi</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <p>ページの配色と文字組みは、<a href="https://design.digital.go.jp/dads/">デジタル庁デザインシステム</a>を参考にしています。</p>
+  </div>
+</footer>
+
+</body>
+</html>
