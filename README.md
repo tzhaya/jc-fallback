@@ -1,7 +1,9 @@
-# JAIRO Cloud Wayback Fallback
+# JAIRO Cloud メタデータ取得・検索ツール
 
-機関リポジトリの本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、最新のアーカイブ URL を CSV に出力する小さなツールです。JAIRO Cloud が停止している間の応急手段として作成しました。
-出力した CSV を絞り込み検索できる静的な HTML ページ（`viewer.html`）も含みます。
+機関リポジトリからIRDBにハーベストされたメタデータを取得します。
+このデータを元に、本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、CSVファイルに出力する小さなツールです。出力したCSVファイルは、静的な HTML ページ（`viewer.html`）で簡易ですが検索できます。
+
+JAIRO Cloud が停止している間の応急手段として作成しました。
 
 ## ご注意
 
@@ -97,7 +99,7 @@ PDF ファイルごとに1行を出力します。
 外部のライブラリは使いません。
 タイトルや表示される説明内容は、適宜変更をお願いいたします。
 
-1. 任意の Web サーバー（GitHub Pages など）の同じ場所に、`viewer.html` と出力した CSV を置きます。CSV のファイル名は `result.csv` にします。
+1. 任意の Web サーバー（機関のWebサーバや GitHub Pages など）に、`viewer.html` と出力した CSV を同じフォルダに置きます。CSVファイルのファイル名は `result.csv` にします。
 2. `viewer.html` を開くと、同じ場所の `result.csv` を自動で読み込みます。
 
 手元で試すときは、CSV のあるフォルダで簡易サーバーを起動します。
