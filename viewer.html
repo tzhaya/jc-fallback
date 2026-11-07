@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>機関リポジトリメタデータ 簡易検索サービス</title>
+<style>
+/* デザイントークンは @digital-go-jp/design-tokens 2.1.0 の値 */
+:root {
+  --blue-50: #e8f1fe;
+  --blue-900: #0017c1;
+  --blue-1000: #00118f;
+  --purple-900: #5109ad;
+  --gray-50: #f2f2f2;
+  --gray-100: #e6e6e6;
+  --gray-420: #949494;
+  --gray-536: #767676;
+  --gray-600: #666666;
+  --gray-800: #333333;
+  --gray-900: #1a1a1a;
+  --green-800: #197a4b;
+  --orange-800: #c74700;
+  --red-900: #ce0000;
+  --yellow-300: #ffd43d;
+  --white: #fff;
+  --black: #000;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--white);
+  color: var(--gray-900);
+  font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+}
+
+a { color: var(--blue-1000); text-underline-offset: 0.17em; text-decoration-thickness: 1px; }
+a:visited { color: var(--purple-900); }
+a:hover { color: var(--blue-900); text-decoration-thickness: 3px; }
+
+/* フォーカスは黄色と黒の二重表示（DADS の方針） */
+:focus-visible {
+  outline: 4px solid var(--yellow-300);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--black);
+  border-radius: 4px;
+}
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+
+header.site {
+  border-bottom: 1px solid var(--gray-420);
+  padding: 16px 0;
+}
+header.site h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+header.site p { margin: 4px 0 0; color: var(--gray-800); font-size: 16px; }
+
+main { padding: 24px 0 48px; }
+
+.field label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.field .hint {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--gray-800);
+}
+.field input[type="search"] {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  min-height: 56px;
+  padding: 8px 16px;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--gray-900);
+  background: var(--white);
+  border: 1px solid var(--gray-536);
+  border-radius: 8px;
+}
+.field input[type="search"]:hover { border-color: var(--black); }
+
+.status-line {
+  margin: 16px 0 8px;
+  min-height: 1.7em;
+  font-weight: 700;
+}
+
+.notice {
+  margin: 16px 0;
+  padding: 16px;
+  border: 2px solid var(--red-900);
+  border-radius: 8px;
+  background: var(--white);
+}
+.notice[hidden] { display: none; }
+.notice p { margin: 0 0 8px; }
+.notice p:last-child { margin-bottom: 0; }
+.notice .title { font-weight: 700; color: var(--red-900); }
+
+.picker {
+  margin: 16px 0;
+  padding: 16px;
+  background: var(--gray-50);
+  border-radius: 8px;
+}
+.picker[hidden] { display: none; }
+.picker p { margin: 0 0 8px; }
+.picker.dragover { outline: 4px dashed var(--blue-900); outline-offset: 2px; }
+.picker input[type="file"] { font: inherit; max-width: 100%; }
+
+.table-wrap {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--gray-420);
+  border-radius: 8px;
+}
+table { width: 100%; border-collapse: collapse; min-width: 900px; }
+caption {
+  text-align: left;
+  padding: 8px 16px;
+  font-weight: 700;
+  background: var(--white);
+}
+th, td {
+  padding: 12px 16px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--gray-100);
+}
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-420);
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 1.5;
+}
+tbody tr:hover { background: var(--blue-50); }
+td.title-cell { min-width: 320px; }
+td.title-cell .file { display: block; margin-top: 4px; font-size: 14px; color: var(--gray-800); word-break: break-all; }
+td.meta { font-size: 14px; line-height: 1.6; }
+td.num { white-space: nowrap; }
+td.links { white-space: nowrap; }
+td.links a { display: block; }
+td.links a + a { margin-top: 4px; }
+
+/* 状態は色だけに頼らず、文字で示す */
+.label {
+  display: inline-block;
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.7;
+  white-space: nowrap;
+  background: var(--white);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}
+.label.ok { color: var(--green-800); }
+.label.no_capture { color: var(--gray-800); }
+.label.no_pdf { color: var(--orange-800); }
+.label.cdx_error { color: var(--red-900); }
+
+.empty { padding: 32px 16px; text-align: center; color: var(--gray-800); }
+
+footer { border-top: 1px solid var(--gray-420); padding: 16px 0; font-size: 14px; color: var(--gray-800); }
+footer p { margin: 0 0 4px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+@media (max-width: 640px) {
+  header.site h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  tbody tr { transition: background-color 0.1s; }
+}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="container">
+    <h1>機関リポジトリメタデータ 簡易検索サービス</h1>
+    <p>IRDBから取得した機関リポジトリのメタデータを検索します。Wayback Machine でPDFファイルが保存されている場合は、そのリンクを表示します。</p>
+  </div>
+</header>
+
+<main class="container">
+  <div class="field">
+    <label for="q">絞り込み</label>
+    <p class="hint" id="q-hint">タイトル、刊行物名、レコード番号、ファイル名などから検索します。空白で区切ると、すべてを含むものだけに絞り込みます。全角・半角と英字の大小は区別しません。</p>
+    <input id="q" type="search" autocomplete="off" aria-describedby="q-hint" disabled>
+  </div>
+
+  <p class="status-line" id="count" role="status" aria-live="polite">読み込み中です…</p>
+
+  <div class="notice" id="error" role="alert" hidden>
+    <p class="title">CSV を読み込めませんでした</p>
+    <p id="error-msg"></p>
+  </div>
+
+  <div class="picker" id="picker" hidden>
+    <p><label for="file"><strong>CSV ファイルを選択してください</strong></label></p>
+    <p>ブラウザでこのページをファイルとして直接開いた場合は、CSV を自動では読み込めません。ここに CSV ファイルをドラッグするか、選択してください。ファイルは端末の中だけで処理され、送信されません。</p>
+    <input id="file" type="file" accept=".csv,text/csv">
+  </div>
+
+  <div class="table-wrap" id="table-wrap" role="region" aria-label="取得結果の一覧" tabindex="0" hidden>
+    <table>
+      <caption id="caption">取得結果</caption>
+      <thead>
+        <tr>
+          <th scope="col">状態</th>
+          <th scope="col">タイトル・ファイル</th>
+          <th scope="col">掲載誌</th>
+          <th scope="col">刊行年月</th>
+          <th scope="col">レコード番号</th>
+          <th scope="col">保存日</th>
+          <th scope="col">リンク</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="empty" id="empty" hidden>条件に合うものはありません。</p>
+  </div>
+</main>
+
+<footer>
+  <div class="container">
+    <p>「取得可」は、Wayback Machine に PDF の保存を確認できたことを示します。複数ファイルのうち一部だけが保存されている場合は区別できません。</p>
+    <p>表示されているメタデータとリンクはデータ取得時点のものです。変更されている場合があります。</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var CSV_URL = "result.csv";
+  var LABELS = {
+    ok: "取得可",
+    no_capture: "未保存",
+    no_pdf: "PDFなし",
+    cdx_error: "照会エラー"
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var els = {
+    q: $("q"), count: $("count"), error: $("error"), errorMsg: $("error-msg"),
+    picker: $("picker"), file: $("file"), wrap: $("table-wrap"),
+    rows: $("rows"), empty: $("empty"), caption: $("caption")
+  };
+
+  var records = [];   // {row, haystack}
+  var timer = null;
+
+  /* ---------- CSV パーサ（引用符・改行入りセル・BOM に対応） ---------- */
+  function parseCsv(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    var table = [], row = [], cell = "", inQuotes = false, i = 0, n = text.length, c;
+    while (i < n) {
+      c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        cell += c; i++; continue;
+      }
+      if (c === '"') { inQuotes = true; i++; }
+      else if (c === ",") { row.push(cell); cell = ""; i++; }
+      else if (c === "\r") { i++; }
+      else if (c === "\n") { row.push(cell); table.push(row); row = []; cell = ""; i++; }
+      else { cell += c; i++; }
+    }
+    if (cell !== "" || row.length) { row.push(cell); table.push(row); }
+    return table;
+  }
+
+  function toObjects(table) {
+    if (!table.length) return [];
+    var head = table[0];
+    return table.slice(1).filter(function (r) {
+      return r.length > 1 || (r.length === 1 && r[0] !== "");
+    }).map(function (r) {
+      var o = {};
+      head.forEach(function (h, k) { o[h] = r[k] === undefined ? "" : r[k]; });
+      return o;
+    });
+  }
+
+  /* ---------- 検索 ---------- */
+  function normalize(s) {
+    return String(s).normalize("NFKC").toLowerCase();
+  }
+
+  function fileName(url) {
+    if (!url) return "";
+    var last = url.split("?")[0].split("/").pop();
+    try { return decodeURIComponent(last); } catch (e) { return last; }
+  }
+
+  function safeHref(url) {
+    return /^https?:\/\//i.test(url || "") ? url : "";
+  }
+
+  function load(rowsArr) {
+    records = rowsArr.map(function (o) {
+      o._file = fileName(o.file_url);
+      var parts = Object.keys(o).map(function (k) { return o[k]; });
+      parts.push(LABELS[o.status] || "");
+      return { row: o, haystack: normalize(parts.join("\n")) };
+    });
+    els.q.disabled = false;
+    els.error.hidden = true;
+    els.picker.hidden = true;
+    els.wrap.hidden = false;
+    render();
+  }
+
+  function filtered() {
+    var terms = normalize(els.q.value).split(/\s+/).filter(Boolean);
+    if (!terms.length) return records;
+    return records.filter(function (rec) {
+      return terms.every(function (t) { return rec.haystack.indexOf(t) !== -1; });
+    });
+  }
+
+  /* ---------- 表示 ---------- */
+  function td(cls, child) {
+    var e = document.createElement("td");
+    if (cls) e.className = cls;
+    if (typeof child === "string") e.textContent = child;
+    else if (child) e.appendChild(child);
+    return e;
+  }
+
+  function link(href, text) {
+    var h = safeHref(href);
+    if (!h) return null;
+    var a = document.createElement("a");
+    a.href = h;
+    a.textContent = text;
+    a.rel = "noopener noreferrer";
+    return a;
+  }
+
+  function buildRow(o) {
+    var tr = document.createElement("tr");
+
+    var label = document.createElement("span");
+    label.className = "label " + (LABELS[o.status] ? o.status : "");
+    label.textContent = LABELS[o.status] || o.status || "不明";
+    tr.appendChild(td("", label));
+
+    var t = document.createElement("div");
+    t.textContent = o.title;
+    if (o._file) {
+      var f = document.createElement("span");
+      f.className = "file";
+      f.textContent = "ファイル: " + o._file;
+      t.appendChild(f);
+    }
+    tr.appendChild(td("title-cell", t));
+
+    var vol = [];
+    if (o.volume) vol.push(o.volume + "巻");
+    if (o.number) vol.push(o.number + "号");
+    if (o.startingPage) vol.push(o.startingPage + (o.endingPage ? "–" + o.endingPage : "") + "頁");
+    var pub = document.createElement("div");
+    pub.textContent = o.publicationName || "";
+    if (vol.length) {
+      var v = document.createElement("span");
+      v.className = "file";
+      v.textContent = vol.join(" ");
+      pub.appendChild(v);
+    }
+    tr.appendChild(td("meta", pub));
+
+    tr.appendChild(td("num", o.publicationDate));
+    tr.appendChild(td("num", o.record_id));
+    tr.appendChild(td("num", o.capture_date));
+
+    var links = document.createElement("div");
+    [[o.archive_url, "Wayback の PDF"], [o.record_url, "リポジトリ詳細"], [o.irdb_url, "IRDB 詳細"]]
+      .forEach(function (p) {
+        var a = link(p[0], p[1]);
+        if (a) links.appendChild(a);
+      });
+    tr.appendChild(td("links", links));
+    return tr;
+  }
+
+  function render() {
+    var list = filtered();
+    var frag = document.createDocumentFragment();
+    list.forEach(function (rec) { frag.appendChild(buildRow(rec.row)); });
+    els.rows.textContent = "";
+    els.rows.appendChild(frag);
+    els.empty.hidden = list.length > 0;
+
+    var items = {};
+    list.forEach(function (rec) { items[rec.row.record_id] = true; });
+    var msg = records.length + " 行中 " + list.length + " 行を表示"
+      + "（アイテム " + Object.keys(items).length + " 件）";
+    els.count.textContent = msg;
+    els.caption.textContent = "取得結果: " + msg;
+  }
+
+  /* ---------- 読み込み ---------- */
+  function showError(msg) {
+    els.errorMsg.textContent = msg;
+    els.error.hidden = false;
+    els.picker.hidden = false;
+    els.count.textContent = "CSV が読み込まれていません。";
+  }
+
+  function readFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try { load(toObjects(parseCsv(String(reader.result)))); }
+      catch (e) { showError("CSV を解析できませんでした: " + e.message); }
+    };
+    reader.onerror = function () { showError("ファイルを読み込めませんでした。"); };
+    reader.readAsText(file, "utf-8");
+  }
+
+  function autoLoad() {
+    if (location.protocol === "file:") {
+      els.picker.hidden = false;
+      els.count.textContent = "CSV ファイルを選択してください。";
+      return;
+    }
+    fetch(CSV_URL, { cache: "no-cache" }).then(function (res) {
+      if (!res.ok) throw new Error(CSV_URL + " が見つかりません（HTTP " + res.status + "）");
+      return res.text();
+    }).then(function (text) {
+      load(toObjects(parseCsv(text)));
+    }).catch(function (e) {
+      showError(e.message + "。このページと同じ場所に " + CSV_URL + " を置くか、下から CSV を選択してください。");
+    });
+  }
+
+  els.q.addEventListener("input", function () {
+    clearTimeout(timer);
+    timer = setTimeout(render, 120);
+  });
+  els.file.addEventListener("change", function () {
+    if (els.file.files[0]) readFile(els.file.files[0]);
+  });
+  ["dragover", "dragenter"].forEach(function (ev) {
+    els.picker.addEventListener(ev, function (e) { e.preventDefault(); els.picker.classList.add("dragover"); });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    els.picker.addEventListener(ev, function () { els.picker.classList.remove("dragover"); });
+  });
+  els.picker.addEventListener("drop", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+  });
+
+  autoLoad();
+})();
+</script>
+</body>
+</html>

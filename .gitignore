@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# 取得キャッシュ（--cache-dir の既定）
+.wb_cache/
+
+# 動作確認・修正前後の比較用の出力
+smoke.csv
+result_before_*.csv

@@ -1,0 +1,69 @@
+# Wayback 代替取得ツール（JAIRO Cloud 停止時の本文 PDF 取得）
+
+## 目的と背景
+- JAIRO Cloud が緊急メンテナンスで約10日間停止（2026-11-07 時点で「向こう1週間ほど」継続の見込み）。
+- 代替手段として、本文 URL から Wayback Machine を引き、保存済みの PDF を入手する簡易アプリを作る。
+- 主な用途は自機関リポジトリの本文 PDF。保存が保証されないことは承知済み。
+- 検証対象リポジトリ: `jircas.repo.nii.ac.jp`（WEKO3）。
+
+## 作る2つのアプリ
+1. **App 1（実装済み・2026-11-07 に全件で実通信を検証済み）**: IRDB から自機関アイテムを列挙し、本文 URL を元に Wayback の最新アーカイブ URL を取得して CSV 出力。担当者が手元で参照・ダウンロードする。登録件数が少ない機関向け。取得は、レコードごとの照会（既定）と `--bulk`（`/record/` 配下を一括で分割取得）の2通り。
+2. **App 2（未着手）**: ブラウザ拡張またはローカル HTML。IRDB / CiNii Research の詳細ページで、Wayback 上の最新アーカイブへのダウンロードリンクを表示する。登録件数が多い機関向け。
+
+## ファイル
+- `wb_fulltext_csv.py`: App 1 本体（標準ライブラリのみ）。使い方は先頭の docstring。
+- 取得対象は実行時に `--host`（必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホスト）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
+- `test_wb_fulltext_csv.py`: オフラインテスト。`python3 test_wb_fulltext_csv.py` で全 `test_*` を実行（pytest は使わない）。
+
+## 確認済みの事実
+- **IRDB OpenSearch**: `https://irdb.nii.ac.jp/opensearch/search`。パラメータは q/title/author/journal/issn/publisher/fulltext(ALL|1)/count(20,50,100)/start/format(rss|atom)。JSON は無い。レート制限・利用条件は仕様ページに記載なし。
+- **Atom の entry に本文ファイル URL は無い**。得られるのは IRDB 詳細ページ（`link`）、ソース元詳細ページ（`URI` = `https://jircas.repo.nii.ac.jp/records/{id}`）、`irname`、`prism:*`。
+- 本文 URL は `https://jircas.repo.nii.ac.jp/record/{id}/files/{ファイル名}.pdf`（クエリなし）。`{id}` は `URI` の番号と同じ。ファイル名は IRDB から導けないため、CDX の**レコード番号配下のプレフィックス照会**で引く方式にした。
+- 実測（レコード 2000885）: CDX に1件あり。`20250722192940`、status 200、length 3427839、**mimetype は `application/octet-stream`**。
+  → mimetype で PDF を絞ってはいけない。URL の拡張子で判定する（実装済み）。
+- `q=jircas.repo.nii.ac.jp&fulltext=1` で totalResults=929（表示した20件はすべて jircas）。`q` は横断検索なので、URI のホストで絞る（実装済み）。`start` を進めて 929 件を完走できた。ホストで絞ると **906 レコード**（重複なし）。
+- **IRDB 一覧の取得は、ページ送りの間に並びが変わると、重複と欠落が同数出る**（最初の取得で 36 件の重複＝36 件の欠落が出て、870 レコードに見えた。取り直すと 906 件で重複なし）。実行時に重複を数えて警告する。警告が出たら `--refresh` で取り直す。
+- **CiNii Research OpenSearch**（`https://cir.nii.ac.jp/opensearch/v2/all?...&format=json`）は `appid` なしでも応答した（仕様上は必須。将来拒否される可能性がある）。`q=jircas.repo.nii.ac.jp` は 0 件で、機関名での検索は通る。`dc:source` に返るのは**詳細ページ URL**（`/records/{id}`）で、本文ファイル名は無い。→ 完全一致照会には使えない。DOI（`10.34556/000{id}`）は record ID と対応する。
+- **CDX の prefix 照会は、`/record/` で終わる指定でも `/records/…` を返す**（実測）。詳細ページ、`export/json`、`export/bibtex`、`/records/{id}/file_details/x.pdf`（**HTML。拡張子だけ .pdf**）が混ざる。`--bulk` では `/record/{id}/files/…` だけに絞る（`group_by_record`）。これを怠ると PDF と誤判定する（実際に 1,477 行中 704 行が偽だった）。
+- `/record/` 配下を一括取得すると、`filter=statuscode:200` で 8,600 行・2 ページ（5,000 + 3,600）。`/records/{id}/files/…` の行は **0 件**で、`record/` 固定の判断を裏付ける。`/record/{id}/files/` 配下の拡張子は .pdf が 1,681 行、.jpg が 5 行。
+- CDX の応答は 1 回 20〜60 秒かかり、時間は返す行数ではなく照会ごとの固定コストが支配的（`limit=5` でも約 21 秒）。Internet Archive は一時的に「Temporarily Offline」（503）になることがある。タイムアウトは 180 秒にし、`--bulk` は途中で失敗したら CSV を出さずに終了する（再実行で続きから進む）。
+
+## 実測の結果（2026-11-07、906 レコード、`--bulk`）
+- アイテム単位: ok = 743（**82.0%**）、no_capture = 156、no_pdf = 7（下記の length 不正）。ファイル単位: 保存を確認できた PDF は 766 件。複数 PDF を持つ ok のアイテムは 19 件。
+- 82.0% は**上限寄りの値**。複数ファイルのうち一部だけ保存されている場合も ok に入り、検出できない（IRDB にも CDX にも、ファイル総数の情報が無い）。
+- **登録順（record ID）で見ると境目がはっきりしている**（WEKO3 の ID は登録順に採番される。担当者に確認済み）。ID < 2000900: 648/679（95.4%）、ID ≧ 2000900: 95/227（**41.9%**）。100 件刻みでは 2000800 番台が 95/95、2000900 番台 20/68（29%）、2001000 番台 49/99（49%）、2001100 番台 26/60（43%）。境目は ID 2000890 前後。**その ID の登録日が確認できないため、境目の原因（クローラの到達範囲など）は未解明**で、調査はここで打ち切った。
+- 公開年（`publicationDate`。刊行年月であり登録日ではない）別の ok: 1994〜2016 年 261/266（98.1%）、2017〜2024 年 277/293（94.5%）、2025〜2026 年 205/347（59.1%）。2026 年は 1 月 9/10、2 月 23/24、**3 月 2/28**。
+- 「新しい（登録が遅い）アイテムほど保存されていない」。JAIRO Cloud 停止中に必要になる新しい本文ほど Wayback では取れない。App 2 に進む判断では、この点を考慮する。
+- IRDB の `updated` は、**登録日・個別の更新日としては使えない**。906 件中 890 件（98%）が 2026-06-07 の同一日（一括更新と思われる）で、ID との対応も検証できない。6 月以外の 16 件の ok は 2 件だけで、「更新されると再クロールされる」仮説は、件数が少なく確認できていない。`updated` は CSV の列として出力している。
+- 詳細ページだけが保存され、本文は保存されていないアイテムが相当数ある（`/record/{id}/files/` の絞り込み前に `no_pdf` だった 124 件はすべてこれ。画像ではない）。現在の出力では no_capture に含まれる。
+- **CDX の `length` が負の値の capture がある**（status 200 なのに）。7 件（record 2000927、2000932〜2000936、2000941。いずれも 2025-09-27〜30 の capture）。実際に確認できたのは 2000936 の 1 件で、`archive_url` が **HTTP 404**（Wayback の HTML エラーページ）だった。残り 6 件は未確認。`has_valid_length` で length が正でない capture を無効とし、該当アイテムは `no_pdf`（7 件）になる。
+- **ダウンロード確認済み**: `archive_url`（`…/web/{timestamp}id_/{original}`）で、3 件（2000258、2001135、2000885）の原本 PDF を取得できた。いずれも先頭が `%PDF-1.6`、末尾に `%%EOF`。CDX の `length`（圧縮後の WARC 内サイズ）は実サイズと一致しない（例 3,427,839 に対し 3,631,163 B）。
+
+## 注意点（ハマりどころ）
+- CDX の `collapse=urlkey` は**最古**の capture を残す。「最新1件」は全 capture を取ってクライアント側で最大 timestamp を選ぶ（実装済み）。
+- WEKO3 の詳細ページは `/records/{id}`、本文ファイルは `/record/{id}/files/…`。本文 URL の path は **`/record/` 固定**で照会する（暫定。WEKO3 の GitHub リポジトリ RCOSDP/weko が 404 でソース確認不可。ファイルは単一の保存先を指すため複数表記の必要性は低いと判断）。
+- 原本を取るには `…/web/{timestamp}id_/{original}`（4 件で確認済み）。`id_` なしはビューア HTML が返る。ダウンロード後の `%PDF-` ヘッダ検証は、ツールには未実装（手動で確認した）。status 200 の capture でも、実体が 404 ページのことがある（`length` が負の値のもの）。
+- Wayback のレート制限は未公表（第三者情報で約1リクエスト/秒が目安）。既定 1 秒間隔、429/503 は待って再試行。User-Agent の連絡先は環境変数 `WB_CONTACT` から取る。**メールアドレスをコードに埋め込まない**。
+- IRDB の HTML ページと jircas のページは、調査時の取得ツールが `robots_disallowed` で拒否された（robots.txt 本体は未確認）。HTML のスクレイピングは避け、OpenSearch 等の公式口を使う。
+- Internet Archive の利用規約は全文を読めていない（JS 描画のため）。取得した PDF の再公開・他機関提供を伴う場合は、規約全文と所内の著作権担当に確認する。
+
+## 未検証（実通信で確認したいこと）
+1. 全件のダウンロード。確認したのは 4 件（PDF 3 件、404 の 1 件）だけ。`length` が負の残り 6 件も未確認。
+2. 部分保存（複数ファイルのうち一部だけ保存）の検出。現状はできない。
+3. no_capture 156 件のうち、詳細ページだけ保存されているものの内訳（出力を分けるかは未決）。
+4. IRDB OpenURL は書誌事項から詳細ページへリダイレクトする仕様。本文 URL は返さない（用途が限られる）。
+5. CiNii Research API の `appid` なし利用がいつまで通るか。
+
+## CSV の列
+`status, title, issn, publicationName, volume, number, startingPage, endingPage, publicationDate, updated, irdb_url, record_url, record_id, file_url, capture_timestamp, capture_date, mimetype, length, n_captures, item_files_captured, archive_url`。
+`prism:*` は列名から `prism:` を除いた名前。同名要素が複数ある場合（言語違い）は lang を出さず、内容を ` | ` で連結する。`n_captures` はファイル単位の capture 数、`item_files_captured` はアイテム単位の保存確認 PDF 数（`cdx_error` の行は空欄）。以前の `pub_date` は `publicationDate` に置き換えた。
+
+## 次の作業
+1. 実装の改善（任意）: ダウンロードした PDF の先頭 `%PDF-` 検証、`robots` や CDX の応答エラーの扱い、no_capture の細分化。
+2. App 2 に進むか判断する。全体の保存確認率は 82.0% だが、新しく登録されたアイテム（ID ≧ 2000900）は 41.9%、公開年が 2025〜2026 年のものは 59.1% で、2026 年 3 月以降はほぼ保存されていない。停止期間に必要な新しい本文の取得には向かない可能性が高い点を踏まえる。
+3. 進める場合は、IRDB / CiNii の詳細ページの DOM から本文 URL が読めるか、まず1ページで確認する。Wayback の最新 capture へのリンクは、遠い未来の日付を指定する形式（例 `…/web/20991231id_/{URL}`）が使えるか未検証。
+   CORS が必要なら、拡張機能の `host_permissions` と Service Worker 経由にする。
+
+## 開発上の約束
+- 依存は標準ライブラリのみ。テストは固定 fixture でネットワークに依存させない。
+- 件数や保存率は、実データで再計算してから報告する。
