@@ -48,6 +48,14 @@ test("ccFromRights は URI・本文の CC を拾い、NC/ND も CC とする", (
   assert.equal(W.ccFromRights(["© by Japan International Research Center for Agricultural Sciences"]).status, "not_cc");
   assert.equal(W.ccFromRights([]).status, "not_cc");
   assert.equal(W.ccFromRights(["https://creativecommons.org/licenses/by/4.0/", "https://creativecommons.org/licenses/by-nc/4.0/"]).status, "conflict");
+  // 1 つの権利情報の本文に、異なる CC の URL が並んでいる場合も conflict（PR #2 の Codex レビューで指摘）
+  assert.deepEqual(
+    W.ccFromRights(["See https://creativecommons.org/licenses/by/4.0/ or https://creativecommons.org/licenses/by-nc/4.0/"]),
+    { status: "conflict", name: "CC BY 4.0 / CC BY-NC 4.0" });
+  // 同じライセンスの表記揺れ（http/https、deed）が並ぶだけなら cc
+  assert.deepEqual(
+    W.ccFromRights(["http://creativecommons.org/licenses/by/4.0/ https://creativecommons.org/licenses/by/4.0/deed.ja"]),
+    { status: "cc", name: "CC BY 4.0" });
 });
 
 test("parseCdxJson は空応答を [] にする", () => {

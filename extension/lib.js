@@ -82,20 +82,33 @@
   /** 文字列中の CC の URL から `CC BY-NC-ND 4.0` / `CC0 1.0` のような名前を返す（App 1 の cc_license_name と同じ）。 */
   function ccLicenseName(s) {
     const m = CC_URL_RE.exec(String(s || ""));
-    if (!m) return null;
+    return m ? ccNameFromMatch(m) : null;
+  }
+
+  function ccNameFromMatch(m) {
     if (m[2]) return "CC0 " + m[3];
     return "CC " + m[1].toUpperCase() + " " + m[3];
+  }
+
+  /** 文字列中のすべての CC の URL から、ライセンス名の一覧を返す。 */
+  function ccLicenseNames(s) {
+    const re = new RegExp(CC_URL_RE.source, "gi");
+    const out = [];
+    for (const m of String(s || "").matchAll(re)) out.push(ccNameFromMatch(m));
+    return out;
   }
 
   /**
    * 権利情報の文字列（本文とリンク先）から CC を判定する。
    * NC/ND 付きも CC と同じ扱い。種類が食い違うときは conflict（要確認。リンクは出さない）。
+   * 1 つの文字列に複数の CC の URL が書かれていることもあるので、すべての URL を見る。
    */
   function ccFromRights(texts) {
     const names = [];
     for (const t of texts || []) {
-      const n = ccLicenseName(t);
-      if (n && names.indexOf(n) < 0) names.push(n);
+      for (const n of ccLicenseNames(t)) {
+        if (names.indexOf(n) < 0) names.push(n);
+      }
     }
     if (names.length === 0) return { status: "not_cc", name: null };
     if (names.length > 1) return { status: "conflict", name: names.join(" / ") };
