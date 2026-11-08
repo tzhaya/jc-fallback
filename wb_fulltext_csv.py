@@ -527,9 +527,11 @@ def fetch_entries_complete(http: Http, query: str, passes: int = 5) -> List[dict
     IRDB の並びは同順位（`updated` が同じ日のものが 98%）の間で要求ごとに入れ替わるらしく、
     ページ送りで重複と欠落が同数出る（2026-11-08 に 2 回続けて 36 件）。取り直すたびに欠落する
     アイテムが変わるので、重ね合わせれば揃う。重複のない件数が 1 回目の件数に達したら止める。
+    `passes` 回取っても揃わなければ IncompleteListing（重複を除いた後なので、main の重複チェック
+    では欠落に気付けない。不完全な一覧をキャッシュしないよう、ここで失敗にする）。
     """
     merged: Dict[str, dict] = {}
-    expected = None
+    expected = 0
     for n in range(1, passes + 1):
         page = fetch_entries(http, query)
         expected = expected or len(page)
@@ -537,8 +539,8 @@ def fetch_entries_complete(http: Http, query: str, passes: int = 5) -> List[dict
             merged.setdefault(e.get("irdb_url", ""), e)
         info(f"IRDB 一覧 {n} 回目: 重複を除いて {len(merged)}/{expected} 件")
         if len(merged) >= expected:
-            break
-    return list(merged.values())
+            return list(merged.values())
+    raise IncompleteListing(f"{passes} 回取得しても {len(merged)}/{expected} 件しか揃わない")
 
 
 ENTRIES_CACHE_VERSION = 2
@@ -721,6 +723,10 @@ def fetch_license(http: Http, host: str, rid: str, caps: List[dict]) -> Optional
 
     404 や JSON でない応答は次の capture へ進む。通信エラーが残った場合は None
     （キャッシュせず、次回の実行で取り直す）。
+
+    `latest` は「ここまでは確定的に処理した」capture の timestamp。新しい capture が通信エラーで
+    取れず、古い capture で判定した場合は、使った capture の timestamp を入れる。CDX の最新と一致
+    しないので、次回の実行で新しい capture を取り直す（古い権利情報のまま固定しないため）。
     """
     transient = False
     for c in caps[:EXPORT_TRIES]:
@@ -741,7 +747,8 @@ def fetch_license(http: Http, host: str, rid: str, caps: List[dict]) -> Optional
             continue
         if not isinstance(record, dict) or not isinstance(record.get("metadata"), dict):
             continue
-        return {"host": host, "rid": rid, "latest": caps[0]["timestamp"],
+        return {"host": host, "rid": rid,
+                "latest": c["timestamp"] if transient else caps[0]["timestamp"],
                 "timestamp": c["timestamp"], "original": c["original"],
                 "info": extract_license_info(record)}
     if transient:
@@ -770,6 +777,10 @@ def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[s
             cf.write(json.dumps(obj, ensure_ascii=False) + "\n")
             cf.flush()
             cache[rid] = obj
+            if obj["latest"] != export_caps[rid][0]["timestamp"]:
+                errors += 1
+                warn(f"record {rid}: 最新の export JSON を取得できず、古い保存で判定しました"
+                     "（次回の実行で取り直します）")
             if i % 50 == 0:
                 info(f"export JSON: {i}/{len(todo)} 件")
     return {r: cache[r] for r in rids if r in cache and r in export_caps}, errors

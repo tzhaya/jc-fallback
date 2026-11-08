@@ -407,6 +407,19 @@ def test_fetch_entries_complete_merges_passes_until_no_gap():
     assert len(http.urls) == 4  # 揃った時点で止まる（3 回目は取らない）
 
 
+def test_fetch_entries_complete_raises_when_still_incomplete():
+    # 毎回 0,1 と 1 の重複（2 が欠落）。5 回重ねても 2/3 件なので、不完全として失敗させる
+    one_pass = [_atom_page(3, 2), _atom_page(3, 1, offset=1)]
+    http = _FakeHttp(one_pass * 5)
+    try:
+        w.fetch_entries_complete(http, "q", passes=5)
+    except w.IncompleteListing:
+        pass
+    else:
+        raise AssertionError("IncompleteListing が出ていない")
+    assert len(http.urls) == 10
+
+
 def test_fetch_entries_short_page_continues_from_actual_count():
     # totalResults=3、要求 100 件に対し最初の応答が 2 件。次は start=3（101 ではない）
     http = _FakeHttp([_atom_page(3, 2), _atom_page(3, 1, offset=2)])
@@ -623,6 +636,24 @@ def test_fetch_license_falls_back_to_older_capture():
     obj = w.fetch_license(http, "h", "1", caps)
     assert obj["timestamp"] == "1" and obj["latest"] == "2"
     assert obj["info"]["rights"]
+
+
+def test_fetch_license_transient_then_fallback_stays_retryable():
+    orig = "https://h/records/1/export/json"
+    caps = [{"timestamp": "2", "original": orig}, {"timestamp": "1", "original": orig}]
+    http = _UrlHttp({w.archive_url("2", orig): TimeoutError(),
+                     w.archive_url("1", orig): json.dumps(EXPORT_JIRCAS)})
+    obj = w.fetch_license(http, "h", "1", caps)
+    assert obj["timestamp"] == "1" and obj["latest"] == "1", obj  # 最新（2）は未処理のまま
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "export_json.jsonl"
+        got, err = w.collect_licenses(http, "h", ["1"], {"1": caps}, p)
+        assert err == 1 and got["1"]["timestamp"] == "1"  # 今回は古い保存で判定する
+        # 次回は最新を取り直す
+        http2 = _UrlHttp({w.archive_url("2", orig): json.dumps(EXPORT_JIRCAS)})
+        got, err = w.collect_licenses(http2, "h", ["1"], {"1": caps}, p)
+        assert http2.calls == [w.archive_url("2", orig)] and err == 0
+        assert got["1"]["timestamp"] == "2" and got["1"]["latest"] == "2"
 
 
 def test_fetch_license_definitive_failure_and_transient():

@@ -14,7 +14,7 @@
 - `wb_fulltext_csv.py`: App 1 本体（標準ライブラリのみ）。使い方は先頭の docstring。
 - 取得対象は実行時に `--host`（必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホスト）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
 - `viewer_staff.html`（担当者向け。全 PDF へのリンク、ライセンス列、「CC のみ」絞り込み）と `docs/sample/viewer_public.html`（一般公開向け。CC と判定した PDF にだけ Wayback へのリンクを出す。初期状態は CC のみ表示）。両者は `PUBLIC` 定数と見出し・注記だけが違う。片方を直したらもう片方にも反映する。旧名は `viewer.html` と `docs/sample/view.html`（2026-11-08 に改名）。
-- ライセンスの判定（`license_for_file`）: 権利情報の URI か本文の CC URL、またはファイルの `licensetype`（license_0〜12）を CC とし、**NC/ND 付きも CC と同じ扱い**（利用者の判断）。CC の種類が食い違う、または `license_no` なのに権利情報が CC のものは `check`（要確認）。export JSON の取得結果は `export_json.jsonl` にキャッシュし、CDX に新しい capture が現れたら取り直す。
+- ライセンスの判定（`license_for_file`）: 権利情報の URI か本文の CC URL、またはファイルの `licensetype`（license_0〜12）を CC とし、**NC/ND 付きも CC と同じ扱い**（利用者の判断）。CC の種類が食い違う、または `license_no` なのに権利情報が CC のものは `check`（要確認）。export JSON の取得結果は `export_json.jsonl` にキャッシュし、CDX に新しい capture が現れたら取り直す。最新の capture が通信エラーで取れず古い capture で判定したときは、`latest` に使った capture の timestamp を入れ、次回の実行で最新を取り直す（PR #1 の Codex レビューで指摘）。
 - `test_wb_fulltext_csv.py`: オフラインテスト。`python3 test_wb_fulltext_csv.py` で全 `test_*` を実行（pytest は使わない）。
 
 ## 確認済みの事実
@@ -24,7 +24,7 @@
 - 実測（レコード 2000885）: CDX に1件あり。`20250722192940`、status 200、length 3427839、**mimetype は `application/octet-stream`**。
   → mimetype で PDF を絞ってはいけない。URL の拡張子で判定する（実装済み）。
 - `q=jircas.repo.nii.ac.jp&fulltext=1` で totalResults=929（表示した20件はすべて jircas）。`q` は横断検索なので、URI のホストで絞る（実装済み）。`start` を進めて 929 件を完走できた。ホストで絞ると **906 レコード**（重複なし）。
-- **IRDB 一覧の取得は、ページ送りの間に並びが変わると、重複と欠落が同数出る**（最初の取得で 36 件の重複＝36 件の欠落が出て、870 レコードに見えた。取り直すと 906 件で重複なし）。2026-11-08 は取り直しても 2 回続けて 36 件の重複が出た（`updated` が同じ日のものが 98% で、同順位の並びが要求ごとに変わるためと推測）。→ `fetch_entries_complete` で一覧を最大 5 回取り、詳細ページ URL で和集合をとる（実測で 893 → 901 → 929/929 件、3 回で揃った）。それでも重複が残れば警告する。
+- **IRDB 一覧の取得は、ページ送りの間に並びが変わると、重複と欠落が同数出る**（最初の取得で 36 件の重複＝36 件の欠落が出て、870 レコードに見えた。取り直すと 906 件で重複なし）。2026-11-08 は取り直しても 2 回続けて 36 件の重複が出た（`updated` が同じ日のものが 98% で、同順位の並びが要求ごとに変わるためと推測）。→ `fetch_entries_complete` で一覧を最大 5 回取り、詳細ページ URL で和集合をとる（実測で 893 → 901 → 929/929 件、3 回で揃った）。5 回で揃わなければ `IncompleteListing` で終了し、一覧をキャッシュしない（和集合は重複が消えるので、重複チェックでは欠落に気付けないため。PR #1 の Codex レビューで指摘）。
 - **CiNii Research OpenSearch**（`https://cir.nii.ac.jp/opensearch/v2/all?...&format=json`）は `appid` なしでも応答した（仕様上は必須。将来拒否される可能性がある）。`q=jircas.repo.nii.ac.jp` は 0 件で、機関名での検索は通る。`dc:source` に返るのは**詳細ページ URL**（`/records/{id}`）で、本文ファイル名は無い。→ 完全一致照会には使えない。DOI（`10.34556/000{id}`）は record ID と対応する。
 - **CDX の prefix 照会は、`/record/` で終わる指定でも `/records/…` を返す**（実測）。詳細ページ、`export/json`、`export/bibtex`、`/records/{id}/file_details/x.pdf`（**HTML。拡張子だけ .pdf**）が混ざる。`--bulk` では `/record/{id}/files/…` だけに絞る（`group_by_record`）。これを怠ると PDF と誤判定する（実際に 1,477 行中 704 行が偽だった）。
 - `/record/` 配下を一括取得すると、`filter=statuscode:200` で 8,600 行・2 ページ（5,000 + 3,600）。`/records/{id}/files/…` の行は **0 件**で、`record/` 固定の判断を裏付ける。`/record/{id}/files/` 配下の拡張子は .pdf が 1,681 行、.jpg が 5 行。
