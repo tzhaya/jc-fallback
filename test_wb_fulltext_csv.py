@@ -397,6 +397,16 @@ def _atom_page(total, n, offset=0):
             f"<opensearch:totalResults>{total}</opensearch:totalResults>{items}</feed>")
 
 
+def test_fetch_entries_complete_merges_passes_until_no_gap():
+    # 1 回目: 0,1 のあと 1 が重複（2 が欠落）。2 回目: 0,2,2（1 が欠落）。和集合で 3 件揃う
+    p1 = [_atom_page(3, 2), _atom_page(3, 1, offset=1)]
+    p2 = [_atom_page(3, 1), _atom_page(3, 2, offset=2).replace("t3", "t2").replace("/3", "/2")]
+    http = _FakeHttp(p1 + p2 + [_atom_page(3, 3)])
+    entries = w.fetch_entries_complete(http, "q")
+    assert sorted(e["irdb_url"] for e in entries) == ["https://irdb/0", "https://irdb/1", "https://irdb/2"]
+    assert len(http.urls) == 4  # 揃った時点で止まる（3 回目は取らない）
+
+
 def test_fetch_entries_short_page_continues_from_actual_count():
     # totalResults=3、要求 100 件に対し最初の応答が 2 件。次は start=3（101 ではない）
     http = _FakeHttp([_atom_page(3, 2), _atom_page(3, 1, offset=2)])
@@ -440,6 +450,227 @@ def test_entries_cache_is_keyed_by_query():
         assert w.load_entries_cache(p, "a") is None
         w.save_entries_cache(p, "a", [])  # 正当な 0 件はキャッシュできる
         assert w.load_entries_cache(p, "a") == []
+
+
+# ---------------------------------------------------------------------------
+# ライセンス情報（export JSON）
+# ---------------------------------------------------------------------------
+
+# jircas 2000879 の export JSON（Wayback 20250812102524）から抜粋。
+EXPORT_JIRCAS = {
+    "id": 2000879,
+    "metadata": {
+        "item_type_id": "40039",
+        "item_30002_rights6": {
+            "attribute_name": "権利情報",
+            "attribute_value_mlt": [
+                {"subitem_rights": "Creative Commons Attribution 4.0 International",
+                 "subitem_rights_language": "en",
+                 "subitem_rights_resource": "https://creativecommons.org/licenses/by/4.0/deed.en"},
+                {"subitem_rights": "©Japan International Research Center for Agricultural Sciences (JIRCAS), 2025",
+                 "subitem_rights_language": "en"},
+            ]},
+        "item_30002_file35": {
+            "attribute_name": "ファイル情報", "attribute_type": "file",
+            "attribute_value_mlt": [
+                {"filename": "gars-e_4.pdf", "licensetype": "license_0", "accessrole": "open_access"},
+                {"filename": "gars-4_en-_Thumbnail.jpg", "licensetype": "license_0"},
+            ]},
+        "item_30002_title0": {"attribute_name": "タイトル",
+                              "attribute_value_mlt": [{"subitem_title": "x"}]},
+    },
+}
+
+
+def _other_itemtype(rights_vals, files):
+    """つくばのように、キーが item_5_rights_12 / タイムスタンプ / item_files の形のもの。"""
+    return {"metadata": {
+        "item_5_rights_12": {"attribute_name": "Rights", "attribute_value_mlt": rights_vals[:1]},
+        "item_1742563285404": {"attribute_name": "権利情報（2）", "attribute_value_mlt": rights_vals[1:]},
+        "item_files": {"attribute_name": "ファイル", "attribute_type": "file",
+                       "attribute_value_mlt": files},
+    }}
+
+
+def test_extract_license_info_jircas():
+    info = w.extract_license_info(EXPORT_JIRCAS)
+    assert len(info["rights"]) == 2
+    assert info["rights"][0]["uri"].startswith("https://creativecommons.org/licenses/by/4.0")
+    assert [f["filename"] for f in info["files"]] == ["gars-e_4.pdf", "gars-4_en-_Thumbnail.jpg"]
+    lic = w.license_for_file(info, "gars-e_4.pdf")
+    assert lic["license_status"] == "cc" and lic["license"] == "CC BY 4.0", lic
+    assert lic["licensetype"] == "license_0"
+    assert "JIRCAS" in lic["rights"]
+
+
+def test_extract_license_info_ignores_property_keys():
+    rec = _other_itemtype(
+        [{"subitem_rights": "© 2024 Someone"},
+         {"subitem_rights": "x", "subitem_rights_resource": "http://creativecommons.org/licenses/by-nc-nd/4.0/"}],
+        [{"filename": "a.pdf"}])
+    info = w.extract_license_info(rec)
+    assert len(info["rights"]) == 2 and info["files"][0]["filename"] == "a.pdf"
+    lic = w.license_for_file(info, "a.pdf")
+    assert lic["license_status"] == "cc" and lic["license"] == "CC BY-NC-ND 4.0", lic
+
+
+def test_cc_license_name_variants():
+    assert w.cc_license_name("https://creativecommons.org/licenses/by/4.0/deed.en") == "CC BY 4.0"
+    assert w.cc_license_name("http://creativecommons.org/licenses/by-nc-nd/4.0/deed/en") == "CC BY-NC-ND 4.0"
+    assert w.cc_license_name("https://creativecommons.org/licenses/by-nc/4.0") == "CC BY-NC 4.0"
+    assert w.cc_license_name("https://creativecommons.org/publicdomain/zero/1.0/") == "CC0 1.0"
+    assert w.cc_license_name("This article is licensed under ... http://creativecommons.org/licenses/by/4.0/.") == "CC BY 4.0"
+    assert w.cc_license_name("https://www.jircas.go.jp/ja/about/guide") is None
+    assert w.cc_license_name("Creative Commons Attribution 4.0 International") is None
+    assert w.cc_license_name("") is None
+
+
+def test_license_cc_url_only_in_rights_text():
+    info = {"rights": [{"text": "https://creativecommons.org/licenses/by/4.0/", "uri": ""}], "files": []}
+    assert w.license_for_file(info, "a.pdf")["license_status"] == "cc"
+
+
+def test_license_filetype_only_is_cc():
+    info = {"rights": [], "files": [{"filename": "a.pdf", "licensetype": "license_5"}]}
+    lic = w.license_for_file(info, "a.pdf")
+    assert lic["license_status"] == "cc" and lic["license"] == "CC BY-NC-ND 4.0", lic
+
+
+def test_license_conflict_is_check():
+    info = {"rights": [{"text": "", "uri": "https://creativecommons.org/licenses/by/4.0/"}],
+            "files": [{"filename": "a.pdf", "licensetype": "license_3"}]}
+    lic = w.license_for_file(info, "a.pdf")
+    assert lic["license_status"] == "check" and lic["license"] == "CC BY 4.0 / CC BY-NC 4.0", lic
+    info["files"][0]["licensetype"] = "license_no"
+    assert w.license_for_file(info, "a.pdf")["license_status"] == "check"
+
+
+def test_license_not_cc_and_no_rights_and_no_json():
+    info = {"rights": [{"text": "© JIRCAS", "uri": "https://www.jircas.go.jp/ja/about/guide"}],
+            "files": [{"filename": "a.pdf", "licensetype": "license_note"}]}
+    assert w.license_for_file(info, "a.pdf")["license_status"] == "not_cc"
+    assert w.license_for_file({"rights": [], "files": []}, "a.pdf")["license_status"] == "no_rights"
+    assert w.license_for_file(None, "a.pdf") == {"license_status": "no_json"}
+
+
+def test_license_item_level_uses_all_pdfs():
+    info = {"rights": [], "files": [{"filename": "a.pdf", "licensetype": "license_0"},
+                                    {"filename": "t.jpg", "licensetype": "license_3"}]}
+    lic = w.license_for_file(info, None)
+    assert lic["license_status"] == "cc" and lic["license"] == "CC BY 4.0", lic
+
+
+def test_add_license_columns_matches_encoded_filename():
+    rows = [{"status": "ok", "record_id": "1",
+             "file_url": "https://h/record/1/files/IJHST_Volume%2013.pdf"},
+            {"status": "no_capture", "record_id": "1"}]
+    lic = {"timestamp": "20250812102524", "original": "https://h/records/1/export/json",
+           "info": {"rights": [], "files": [{"filename": "IJHST_Volume 13.pdf", "licensetype": "license_0"}]}}
+    out = w.add_license_columns(rows, lic)
+    assert out[0]["license_status"] == "cc"
+    assert out[0]["license_capture_date"] == "2025-08-12"
+    assert out[0]["license_source_url"] == "https://web.archive.org/web/20250812102524id_/https://h/records/1/export/json"
+    assert out[1]["license_status"] == "cc"  # アイテム単位（PDF 全体）で判定
+    assert w.add_license_columns(rows, None)[0]["license_status"] == "no_json"
+    assert w.add_license_columns(rows, {"latest": "1", "info": None})[0]["license_status"] == "no_json"
+
+
+def test_group_export_json_filters_and_sorts():
+    rows = [
+        {"timestamp": "20240101000000", "original": "https://h/records/5/export/json", "statuscode": "200", "length": "100"},
+        {"timestamp": "20250101000000", "original": "https://h/records/5/export/json", "statuscode": "200", "length": "100"},
+        {"timestamp": "20260101000000", "original": "https://h/records/5/export/json", "statuscode": "200", "length": "-1"},
+        {"timestamp": "20250101000000", "original": "https://h/records/5/export/bibtex", "statuscode": "200", "length": "1"},
+        {"timestamp": "20250101000000", "original": "https://h/records/5.1/export/json", "statuscode": "200", "length": "1"},
+        {"timestamp": "20250101000000", "original": "https://h/record/5/files/a.pdf", "statuscode": "200", "length": "1"},
+    ]
+    g = w.group_export_json(rows)
+    assert list(g) == ["5"]
+    assert [r["timestamp"] for r in g["5"]] == ["20250101000000", "20240101000000"]
+
+
+def test_decode_body_gzip():
+    import gzip
+    body = json.dumps({"metadata": {}}).encode("utf-8")
+    assert w.decode_body(gzip.compress(body), "gzip") == body.decode("utf-8")
+    assert w.decode_body(gzip.compress(body), "") == body.decode("utf-8")  # ヘッダが無くても先頭で判定
+    assert w.decode_body("日本語".encode("utf-8")) == "日本語"
+
+
+class _UrlHttp:
+    def __init__(self, responses):
+        self.responses = responses  # url -> str | Exception
+        self.calls = []
+
+    def get(self, url, retries=5, timeout=60):
+        self.calls.append(url)
+        r = self.responses[url]
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+def _http_error(code):
+    import urllib.error
+    return urllib.error.HTTPError("u", code, "x", {}, None)
+
+
+def test_fetch_license_falls_back_to_older_capture():
+    caps = [{"timestamp": "2", "original": "https://h/records/1/export/json"},
+            {"timestamp": "1", "original": "https://h/records/1/export/json"}]
+    http = _UrlHttp({w.archive_url("2", caps[0]["original"]): _http_error(404),
+                      w.archive_url("1", caps[1]["original"]): json.dumps(EXPORT_JIRCAS)})
+    obj = w.fetch_license(http, "h", "1", caps)
+    assert obj["timestamp"] == "1" and obj["latest"] == "2"
+    assert obj["info"]["rights"]
+
+
+def test_fetch_license_definitive_failure_and_transient():
+    caps = [{"timestamp": "2", "original": "https://h/records/1/export/json"}]
+    url = w.archive_url("2", caps[0]["original"])
+    obj = w.fetch_license(_UrlHttp({url: "<html>not json</html>"}), "h", "1", caps)
+    assert obj["info"] is None and obj["latest"] == "2"
+    assert w.fetch_license(_UrlHttp({url: TimeoutError()}), "h", "1", caps) is None
+
+
+def test_collect_licenses_uses_cache_and_refetches_newer_capture():
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "export_json.jsonl"
+        orig = "https://h/records/1/export/json"
+        p.write_text(json.dumps({"host": "h", "rid": "1", "latest": "1", "timestamp": "1",
+                                 "original": orig, "info": {"rights": [], "files": []}}) + "\n",
+                     encoding="utf-8")
+        http = _UrlHttp({})
+        got, err = w.collect_licenses(http, "h", ["1", "2"], {"1": [{"timestamp": "1", "original": orig}]}, p)
+        assert http.calls == [] and err == 0 and list(got) == ["1"]
+        # 新しい capture が現れたら取り直す
+        http = _UrlHttp({w.archive_url("3", orig): json.dumps(EXPORT_JIRCAS)})
+        got, err = w.collect_licenses(http, "h", ["1"], {"1": [{"timestamp": "3", "original": orig}]}, p)
+        assert len(http.calls) == 1 and got["1"]["timestamp"] == "3"
+        # 再読み込みでも新しい方が使われる
+        assert w.load_license_cache(p, "h")["1"]["timestamp"] == "3"
+        assert w.load_license_cache(p, "other") == {}
+
+
+def test_parser_defaults_bulk_and_license_on():
+    a = w.build_parser().parse_args(["--host", "h"])
+    assert a.bulk is True and a.license is True
+    a = w.build_parser().parse_args(["--host", "h", "--no-license"])
+    assert a.bulk is True and a.license is False
+    a = w.build_parser().parse_args(["--host", "h", "--no-bulk"])
+    assert a.bulk is False
+
+
+def test_no_license_leaves_license_columns_empty():
+    # --no-license では add_license_columns を通さない。CSV にはライセンスの列があり、値は空
+    rows = w.build_rows({"title": "t", "uri": "https://h/records/1"}, "1", [])
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "o.csv"
+        w.write_csv(p, rows)
+        got = list(csv.DictReader(p.open(encoding="utf-8-sig")))
+    for k in ("license_status", "license", "rights", "rights_uri", "licensetype",
+              "license_capture_date", "license_source_url"):
+        assert k in got[0] and got[0][k] == "", k
 
 
 def _run_all():
