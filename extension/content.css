@@ -1,0 +1,51 @@
+/* IRDB のスタイルと衝突しないよう、すべて #wbfb-panel 配下に限定する。色は DADS のトークン値。 */
+#wbfb-panel {
+  margin: 0 0 24px;
+  padding: 16px 20px;
+  border: 1px solid #949494;
+  border-left: 6px solid #0017c1;
+  border-radius: 8px;
+  background: #e8f1fe;
+  color: #1a1a1a;
+  font-size: 16px;
+  line-height: 1.7;
+}
+#wbfb-panel h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
+#wbfb-panel h3 { margin: 16px 0 4px; font-size: 16px; font-weight: 700; }
+#wbfb-panel p { margin: 4px 0; }
+#wbfb-panel ul { margin: 4px 0; padding-left: 1.5em; }
+#wbfb-panel li { margin: 2px 0; overflow-wrap: anywhere; }
+#wbfb-panel a { color: #00118f; text-decoration: underline; text-underline-offset: 0.17em; }
+#wbfb-panel a:visited { color: #5109ad; }
+#wbfb-panel a:hover { color: #0017c1; text-decoration-thickness: 3px; }
+#wbfb-panel a:focus-visible,
+#wbfb-panel button:focus-visible {
+  outline: 4px solid #ffd43d;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #000;
+  border-radius: 4px;
+}
+#wbfb-panel .wbfb-status { color: #333333; }
+#wbfb-panel .wbfb-name { font-weight: 700; }
+#wbfb-panel .wbfb-retry {
+  margin-left: 4px;
+  padding: 2px 10px;
+  border: 1px solid #0017c1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0017c1;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+#wbfb-panel .wbfb-note { margin-top: 8px; font-size: 14px; color: #333333; }
+
+/* 確認中の項目名（リンクにしない）。無効であることが分かるよう、灰色にする。 */
+#wbfb-panel .wbfb-pending { color: #666666; cursor: not-allowed; }
+
+/* 確認中の点（content.js が 1〜6 個に書き換える）。幅を固定して、後ろの文字が揺れないようにする。 */
+#wbfb-panel .wbfb-dots {
+  display: inline-block;
+  min-width: 3.5em;
+  margin-left: 2px;
+}

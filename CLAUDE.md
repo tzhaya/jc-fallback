@@ -8,13 +8,17 @@
 
 ## 作る2つのアプリ
 1. **App 1（実装済み・2026-11-07 に全件で実通信を検証済み）**: IRDB から自機関アイテムを列挙し、本文 URL を元に Wayback の最新アーカイブ URL を取得して CSV 出力。担当者が手元で参照・ダウンロードする。登録件数が少ない機関向け。取得は、レコードごとの照会（既定）と `--bulk`（`/record/` 配下を一括で分割取得）の2通り。`--license`（2026-11-08 実装）で export JSON からライセンスを判定して列に出す。**`--bulk` と `--license` は既定で有効**（`BooleanOptionalAction`。`--no-bulk` / `--no-license` で無効）。`--no-license` と `--no-bulk` のときはライセンスの 7 列を空にする（`--no-bulk` では export JSON の保存先が分からないため、警告して取得しない）。
-2. **App 2（未着手）**: ブラウザ拡張またはローカル HTML。IRDB / CiNii Research の詳細ページで、Wayback 上の最新アーカイブへのダウンロードリンクを表示する。登録件数が多い機関向け。
+2. **App 2（2026-11-08 実装、`extension/`）**: Chrome / Edge 向けの拡張機能（MV3。まずは「パッケージ化されていない拡張機能を読み込む」で配る）。**IRDB の詳細ページだけ**が対象（CiNii Research は対象外）。対象リポジトリは JAIRO Cloud 全体で、`*.repo.nii.ac.jp` と、独自ドメインで運用しているものの一覧（`lib.js` の `CUSTOM_HOSTS`、18 ホスト。利用者から提供、2026-11-08）。一覧外のホストは、WEKO3 と同じ URL の形でも対象外（JAIRO Cloud 以外は何も表示しない方針のため）。独自ドメインのうち naro、tottori-u、u-tokyo の 3 つは、IRDB の URL が `/records/{id}` と `/record/{id}/files/…` であることを確認済み。残り 15 は未確認。登録件数が多い機関向け。
+   - **一般向け**: 本文 PDF へのリンクは、IRDB の「権利情報」が CC（NC/ND 付きも CC）の資料にだけ出す。CC の種類が食い違うときは出さない。ランディングページ（`/records/{id}`）の保存版へのリンクはすべての資料に出す。
+   - 公開日（ファイルの `Available`）が未来のファイル、アクセス権が restricted / metadata only のもの、embargoed で公開日が無いものには、CC でもリンクを出さない（2001115 は CC だが Available 2027-05-13 のエンバーゴ）。
+   - 保存の確認: 確認が終わるまで項目名はリンクにせず（`aria-disabled`）、点の連続（JS で 300 ms ごとに 1〜6 個へ書き換える。CSS の `content` のアニメーションでは、実環境で点が増えなかった）で確認中を示す。Service Worker が CDX を照会し、保存日付きのリンク・「保存されていません」・「保存版が壊れている可能性」（length 不正のみ）のどれかにする。照会に失敗したときだけ `…/web/20991231id_/{URL}`（ランディングは `id_` なし）をリンクにし、「再確認」ボタンを出す（2026-11-08 に、当初の「仮リンクを先に出す」方式 C から変更）。CDX は files（`/record/{id}/files/`）と landing（`/records/{id}`）の 2 回。非 CC の資料では files を照会しない。照会は 1 秒間隔・180 秒タイムアウト・429/502/503/504 は再試行。結果は `chrome.storage.local` に 6 時間キャッシュ（失敗はキャッシュしない）。
 
 ## ファイル
 - `wb_fulltext_csv.py`: App 1 本体（標準ライブラリのみ）。使い方は先頭の docstring。
 - 取得対象は実行時に `--host`（必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホスト）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
 - `viewer_staff.html`（担当者向け。全 PDF へのリンク、ライセンス列、「CC のみ」絞り込み）と `docs/sample/viewer_public.html`（一般公開向け。CC と判定した PDF にだけ Wayback へのリンクを出す。初期状態は CC のみ表示）。両者は `PUBLIC` 定数と見出し・注記だけが違う。片方を直したらもう片方にも反映する。旧名は `viewer.html` と `docs/sample/view.html`（2026-11-08 に改名）。
 - ライセンスの判定（`license_for_file`）: 権利情報の URI か本文の CC URL、またはファイルの `licensetype`（license_0〜12）を CC とし、**NC/ND 付きも CC と同じ扱い**（利用者の判断）。CC の種類が食い違う、または `license_no` なのに権利情報が CC のものは `check`（要確認）。export JSON の取得結果は `export_json.jsonl` にキャッシュし、CDX に新しい capture が現れたら取り直す。最新の capture が通信エラーで取れず古い capture で判定したときは、`latest` に使った capture の timestamp を入れ、次回の実行で最新を取り直す（PR #1 の Codex レビューで指摘）。
+- `extension/`: App 2。`lib.js`（DOM に依存しない判定ロジック。content script・Service Worker・Node テストで共有）、`content.js`（IRDB の表を th の見出し〈ファイル/File、権利情報/Rights、資源識別子/Identifier、アクセス権/Accessrights〉で読み、パネルを表の直前に挿入）、`background.js`（CDX 照会とキャッシュ）、`content.css`、`manifest.json`。テストは `node --test extension/test/*.test.js`（Node 標準のみ。DOM 部分は対象外で、IRDB の実ページ 9 件にスクリプトを注入して確認した）。
 - `test_wb_fulltext_csv.py`: オフラインテスト。`python3 test_wb_fulltext_csv.py` で全 `test_*` を実行（pytest は使わない）。
 
 ## 確認済みの事実
@@ -64,6 +68,13 @@
   - Wayback で取れる PDF のファイル名は、すべて export JSON のファイル一覧に含まれていた。
 - 保存状況（`cdx_bulk.jsonl` から集計、statuscode 200）: export/json があるのは 906 中 689 レコード（うち 11 件は length が負の capture だけ）。ok の 743 件のうち 668 件。ID ≧ 2000900 では 227 中 63 件、ok 95 件のうち 48 件だけ。
 
+## App 2 のための確認（2026-11-08）
+- `…/web/20991231id_/{URL}` は最新の capture へ 302 で転送され、`id_` も保たれる（2000885 で確認）。保存が無い URL は 404。ただし status や length を見ずに最新を選ぶので、length が負の capture に飛ぶ可能性がある。→ CDX で確認できたら timestamp 指定のリンクに置き換える。
+- **CDX API は `Access-Control-Allow-Origin` を返さない**（ページの JS からは読めない）。Availability API（`archive.org/wayback/available`）は `*` を返すが length が無い。→ 拡張機能の Service Worker と `host_permissions` で CDX を引く。
+- IRDB の詳細ページはサーバー側描画。`<th>ファイル</th>` の td に `li.mb-2` ごとのファイル（`span` の objectType ラベル、本文 URL の `a`、`Available` の日付）、`<th>資源識別子</th>` に `URI` のリンク（`/records/{id}`）、`<th>権利情報</th>` に CC の URI（リンクと本文）がある。英語版（`/en/…`）は th が File / Identifier / Rights / Accessrights。
+- IRDB には JAIRO Cloud 以外のリポジトリ（DSpace の `/bitstreams/…/download` など）の資料もある。JAIRO Cloud にも独自ドメインで運用しているものがある（`repository.dl.itc.u-tokyo.ac.jp` など。当初は JAIRO Cloud 以外の WEKO3 と誤認していた）。App 2 は `*.repo.nii.ac.jp` と `CUSTOM_HOSTS` 以外を対象外にした。
+- IRDB に載っているファイル名と、Wayback に保存されたファイル名は違うことがある（2000879 は IRDB が `gars-4_en-2nd_ed.pdf`、保存されているのは差し替え前の `gars-e_4.pdf`）。App 2 は IRDB に載っているファイルだけを出す。
+
 ## 注意点（ハマりどころ）
 - CDX の `collapse=urlkey` は**最古**の capture を残す。「最新1件」は全 capture を取ってクライアント側で最大 timestamp を選ぶ（実装済み）。
 - WEKO3 の詳細ページは `/records/{id}`、本文ファイルは `/record/{id}/files/…`。本文 URL の path は **`/record/` 固定**で照会する（暫定。WEKO3 の GitHub リポジトリ RCOSDP/weko が 404 でソース確認不可。ファイルは単一の保存先を指すため複数表記の必要性は低いと判断）。
@@ -86,9 +97,7 @@
 ## 次の作業
 1. 公開済みの GitHub Pages の URL が `sample/view.html` から `sample/viewer_public.html` に変わった。旧 URL を残すか（転送用ページ）は未決。
 2. 実装の改善（任意）: ダウンロードした PDF の先頭 `%PDF-` 検証、`robots` や CDX の応答エラーの扱い、no_capture の細分化。
-3. App 2 に進むか判断する。全体の保存確認率は 82.0% だが、新しく登録されたアイテム（ID ≧ 2000900）は 41.9%、公開年が 2025〜2026 年のものは 59.1% で、2026 年 3 月以降はほぼ保存されていない。停止期間に必要な新しい本文の取得には向かない可能性が高い点を踏まえる。
-4. 進める場合は、IRDB / CiNii の詳細ページの DOM から本文 URL が読めるか、まず1ページで確認する（IRDB は 1 件で確認済み。上の「ライセンス情報の取得」）。Wayback の最新 capture へのリンクは、遠い未来の日付を指定する形式（例 `…/web/20991231id_/{URL}`）が使えるか未検証。
-   CORS が必要なら、拡張機能の `host_permissions` と Service Worker 経由にする。
+3. App 2: 実際に拡張機能として読み込んだ状態での動作確認（Service Worker の CDX 照会とキャッシュ、長い照会中に Service Worker が止まらないか）。必要なら Chrome Web Store での公開を検討する。
 
 ## 開発上の約束
 - 依存は標準ライブラリのみ。テストは固定 fixture でネットワークに依存させない。

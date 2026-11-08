@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JAIRO Cloud メタデータ取得・検索ツール</title>
-<meta name="description" content="機関リポジトリの本文 PDF が Wayback Machine に保存されているかを調べ、CSV に出力するツールと、その CSV を検索する静的ページです。">
+<meta name="description" content="機関リポジトリの本文 PDF が Wayback Machine に保存されているかを調べ、CSV に出力するツールと、その CSV を検索する静的ページ、IRDB の詳細ページに保存版へのリンクを表示するブラウザ拡張機能です。">
 <style>
 /* デザイントークンは @digital-go-jp/design-tokens 2.1.0 の値 */
 :root {
@@ -191,6 +191,7 @@ footer p { margin: 0 0 4px; }
       <li><a href="#usage">使い方</a></li>
       <li><a href="#columns">取得する情報</a></li>
       <li><a href="#viewer">閲覧ページの設置</a></li>
+      <li><a href="#extension">ブラウザ拡張機能</a></li>
       <li><a href="#license">ライセンス</a></li>
     </ul>
   </div>
@@ -200,30 +201,30 @@ footer p { margin: 0 0 4px; }
 
   <section id="about">
     <h2>概要</h2>
-    <p>機関リポジトリから IRDB にハーベストされたメタデータを取得します。</p>
-    <p>このデータを元に、本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、CSV ファイルに出力します。
-    出力した CSV ファイルは、静的な HTML ページで簡易ですが検索できます。ページは、担当者向けの <code>viewer_staff.html</code> と、一般公開向けの <code>docs/sample/viewer_public.html</code> の2種類です。</p>
-    <p>Python の標準ライブラリだけで動作し、追加のインストールは要りません。</p>
+    <p>本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、保存版へのリンクを示します。用途に応じて、次の2つの方法を使い分けます。</p>
+    <ul>
+      <li><strong>CSV 出力ツール</strong>：機関リポジトリから IRDB にハーベストされたメタデータを取得し、保存状況を CSV ファイルに出力します。出力した CSV ファイルは、静的な HTML ページで簡易に検索できます。ページは、担当者向けの <code>viewer_staff.html</code> と、一般公開向けの <code>docs/sample/viewer_public.html</code> の2種類です。Python の標準ライブラリだけで動作し、追加のインストールは要りません。</li>
+      <li><strong>ブラウザ拡張機能</strong>：IRDB の詳細ページに、保存版へのリンクを表示します。CSV を作らずに使えるので、登録件数が多い機関に向いています（<a href="#extension">後述</a>）。</li>
+    </ul>
   </section>
 
   <section id="notes">
     <h2>ご注意</h2>
     <div class="notice">
       <ul>
-        <li>元の機関リポジトリ上のすべての PDF ファイルが Wayback Machine に保存されている保証はありません。保存されるのはクローラが到達したものだけです。</li>
+        <li>元の機関リポジトリにあるすべての PDF ファイルが、Wayback Machine に保存されているとは限りません。保存されるのは、クローラが到達したものだけです。</li>
         <li>ランディングページが Wayback Machine に保存されていても、PDF ファイルは保存されていないことがあります。</li>
-        <li>新しく登録されたアイテムほど保存されていない傾向があります。</li>
-        <li>国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% が Wayback Machine に保存されていました。レコード番号が 2000900 未満のアイテムでは 95%、2000900 以上では 42% が保存されているなど、最近のアイテムが保存されていないようでした。</li>
-        <li>ライセンスは、Wayback Machine に保存された各アイテムのメタデータから判定します。メタデータが保存されていないアイテムは判定できません。国際農研のリポジトリ（906 件）で 2026-11-08 に確認したところ、メタデータを取得できたのは 677 件で、CC ライセンスと判定できたのは 34 件（うち PDF を取得できるものは 33 件）でした。</li>
-        <li>提供されているファイルのライセンスやメタデータの詳細は、IRDB 上でご確認ください。</li>
-        <li>取得した PDF の再公開及び他機関への提供は、元のファイルのライセンスに従ってください。Internet Archive の利用条件と、IRDB 上のメタデータに記述されたライセンス情報、また提供機関に確認してください。</li>
+        <li>新しく登録されたアイテムほど、保存されていない傾向があります。国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% のアイテムが Wayback Machine に保存されていました。レコード番号が 2000900 未満のアイテムでは 95% が保存されていたのに対し、2000900 以上では 42% でした。</li>
+        <li>CSV 出力ツールは、Wayback Machine に保存された各アイテムのメタデータからライセンスを判定します。メタデータが保存されていないアイテムは判定できません。国際農研のリポジトリ（906 件）で 2026-11-08 に確認したところ、メタデータを取得できたのは 677 件で、CC ライセンスと判定できたのは 34 件（うち PDF を取得できるものは 33 件）でした。</li>
+        <li>提供されているファイルのライセンスやメタデータの詳細は、IRDB 上で確認してください。</li>
+        <li>取得した PDF を再公開したり、他機関に提供したりするときは、元のファイルのライセンスに従ってください。Internet Archive の利用条件と、IRDB 上のメタデータに書かれたライセンス情報を確かめ、提供機関にも確認してください。</li>
       </ul>
     </div>
 
     <h3>免責事項</h3>
     <div class="disclaimer">
-      <p>プログラムの動作確認等は作者によって行っておりますが、万全であることは保証できません。また、数万件単位など、大量のデータ取得についてはテストを行っていません。</p>
-      <p>ご利用とその結果については、利用者の責任において行ってください。作者はその責を負いません。</p>
+      <p>プログラムの動作は作者が確認していますが、万全であることは保証できません。数万件単位などの大量のデータ取得は試していません。</p>
+      <p>利用とその結果については、利用者の責任で判断してください。作者はその責任を負いません。</p>
     </div>
   </section>
 
@@ -241,7 +242,7 @@ footer p { margin: 0 0 4px; }
           <tr><td><code>--out</code></td><td>出力する CSV（既定: <code>wayback_fulltext.csv</code>）</td></tr>
           <tr><td><code>--bulk</code> / <code>--no-bulk</code></td><td><code>/record/</code> 配下を一括で分割取得して突き合わせる（既定）。<code>--no-bulk</code> ではアイテムごとに照会する</td></tr>
           <tr><td><code>--license</code> / <code>--no-license</code></td><td>Wayback に保存された各アイテムのメタデータ（WEKO3 の <code>export/json</code>）から、ライセンス情報を取得する（既定）。初回は数百件で数十分かかる。<code>--no-license</code> では取得せず、ライセンスの列を空にする。<code>--no-bulk</code> のときも取得しない</td></tr>
-          <tr><td><code>--limit N</code></td><td>動作確認用に先頭 N 件だけ処理する</td></tr>
+          <tr><td><code>--limit N</code></td><td>動作確認用に、先頭の N 件だけを処理する</td></tr>
           <tr><td><code>--refresh</code></td><td>IRDB の一覧を取り直す</td></tr>
           <tr><td><code>--cache-dir</code></td><td>キャッシュの保存先（既定: <code>.wb_cache</code>）</td></tr>
           <tr><td><code>--interval</code></td><td>リクエスト間隔の秒数（既定: 1.0）</td></tr>
@@ -256,8 +257,9 @@ footer p { margin: 0 0 4px; }
       <li>PDF ごとに、最新の保存を選びます。</li>
       <li>Wayback に保存された各アイテムのメタデータを取得し、権利情報とファイルのライセンス種別から、CC ライセンスかどうかを判定します（<code>--no-license</code> のときは行いません）。</li>
     </ol>
-    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば取得済みの分は再利用されます。ライセンス情報もキャッシュに残るため、2回目以降は Wayback に新しい保存が現れたアイテムだけを取り直します。図書館担当者の利用に限定する場合は、<code>--no-license</code> を付けるとライセンス情報の取得を省けます。</p>
-    <p>Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待って再試行します。CDX の応答には、1回あたり20〜60秒かかることがあります。</p>
+    <p>既定の <code>--bulk</code> は、アイテムごとに照会するかわりに <code>/record/</code> 配下をまとめて取得するので、通信回数が少なくて済みます。</p>
+    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
+    <p><code>WB_CONTACT</code> は User-Agent に付ける連絡先で、環境変数で渡します。Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。CDX の応答には、1回あたり 20〜60 秒かかることがあります。</p>
   </section>
 
   <section id="columns">
@@ -284,25 +286,52 @@ footer p { margin: 0 0 4px; }
       </table>
     </div>
     <ul>
-      <li>複数ファイルのうち一部だけが保存されている場合でも、<code>ok</code> になります。ファイルの不足は検出できません。</li>
-      <li><code>capture_date</code> は Wayback が最後に取得した日です。その後にリポジトリ側で差し替えられた場合は、反映されていません。</li>
+      <li>複数のファイルのうち一部だけが保存されている場合も、<code>ok</code> になります。ファイルの不足は検出できません。</li>
+      <li><code>capture_date</code> は、Wayback が最後に保存した日です。その後にリポジトリ側でファイルが差し替えられていても、反映されていません。</li>
     </ul>
   </section>
 
   <section id="viewer">
     <h2>閲覧ページの設置</h2>
-    <p>閲覧ページは、CSV を表示してテキストボックスの入力で絞り込む単体のページです。外部のライブラリは使いません。用途に応じて、次の2種類を使い分けます。</p>
+    <p>閲覧ページは、CSV を表示し、テキストボックスへの入力で絞り込む単体のページです。外部のライブラリは使いません。用途に応じて、次の2種類を使い分けます。ページのタイトルと説明文は、設置する機関に合わせて書き換えてください。</p>
     <ul>
       <li><code>viewer_staff.html</code>（担当者向け）：すべての PDF へのリンクと、ライセンスの判定結果を表示します。「CC ライセンスのものだけを表示する」で絞り込めます。</li>
-      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では CC ライセンスのものだけを表示します。冒頭のサンプルの説明は書き換えてください。</li>
+      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では、CC ライセンスのものだけを表示します。冒頭にあるサンプルの説明は書き換えてください。</li>
     </ul>
     <p>一般公開向けのページには、ライセンス情報を含む CSV（<code>--no-license</code> も <code>--no-bulk</code> も付けずに出力したもの）を使います。ライセンスの列が無いか空の CSV では、PDF へのリンクを1件も表示しません。</p>
     <ol>
-      <li>任意の Web サーバー（機関の Web サーバーや GitHub Pages など）に、閲覧ページと出力した CSV を同じフォルダに置きます。CSV のファイル名は <code>result.csv</code> にします。</li>
+      <li>任意の Web サーバー（機関の Web サーバーや GitHub Pages など）の同じフォルダに、閲覧ページと出力した CSV を置きます。CSV のファイル名は <code>result.csv</code> にします。</li>
       <li>閲覧ページを開くと、同じ場所の <code>result.csv</code> を自動で読み込みます。</li>
     </ol>
-    <p>閲覧ページをファイルとして直接開いた場合は、ブラウザの制限により CSV を自動では読み込めません。画面の「CSV ファイルを選択」から選ぶか、ドラッグ&amp;ドロップで渡してください。ファイルは端末の中だけで処理され、送信されません。</p>
+    <p>閲覧ページをファイルとして直接開いた場合は、ブラウザの制限により、CSV を自動では読み込めません。画面の「CSV ファイルを選択」から選ぶか、ドラッグ&amp;ドロップで渡してください。ファイルは端末の中だけで処理し、外部には送信しません。</p>
+    <p>絞り込みは、CSV のすべての列を対象にします。空白で区切って複数の語を入力すると、すべての語を含む行だけが残ります。全角と半角、英字の大文字と小文字は区別しません。読み込む CSV のファイル名を変えるときは、閲覧ページの <code>CSV_URL</code> を書き換えます。</p>
     <p>国際農研のデータを使ったサンプルを、<a href="sample/viewer_public.html">このサイトで公開しています</a>。</p>
+  </section>
+
+  <section id="extension">
+    <h2>ブラウザ拡張機能</h2>
+    <p><code>extension/</code> は、<a href="https://irdb.nii.ac.jp/">IRDB</a> の詳細ページに、Wayback Machine の保存版へのリンクを表示する Chrome / Edge 用の拡張機能（Manifest V3）です。CSV を作らずに使えるので、登録件数が多く、CSV の作成に時間がかかる機関に向いています。表示は一般の利用者向けで、本文 PDF へのリンクは CC ライセンスの資料にだけ出します。</p>
+    <ul>
+      <li>対象は、JAIRO Cloud の資料だけです。<code>*.repo.nii.ac.jp</code> のほか、独自ドメインで運用しているリポジトリ（<code>repository.naro.go.jp</code> など）も対象です。ほかのリポジトリの資料のページでは、何も表示しません。</li>
+      <li>独自ドメインのリポジトリは、<code>extension/lib.js</code> の <code>CUSTOM_HOSTS</code> に一覧で持っています。一覧に無いリポジトリを対象にするときは、ホスト名を一覧に足してください。</li>
+      <li>ランディングページ（<code>/records/{id}</code>）の保存版へのリンクは、すべての資料に表示します。</li>
+      <li>本文 PDF の保存版へのリンクは、IRDB の「権利情報」に CC ライセンス（NC や ND の条件が付くものを含む）が書かれている資料にだけ表示します。ただし、公開日（Available）より前のファイルと、アクセスが制限されているファイルには表示しません。</li>
+      <li>リンクを表示する前に、Wayback Machine に保存状況を問い合わせます。保存を確認できたものだけをリンクにし、保存日を添えます。確認が終わるまでは項目名をリンクにせず、点の連続で通信中であることを示します。</li>
+      <li>問い合わせには、1件あたり数十秒かかることがあります。問い合わせに失敗したときは、最新の保存版へのリンクを表示します（開けない場合があります）。</li>
+      <li>問い合わせの結果は、6時間ブラウザに保存します。</li>
+    </ul>
+
+    <h3>インストール（パッケージ化されていない拡張機能として読み込む）</h3>
+    <ol>
+      <li><a href="https://github.com/tzhaya/jc-fallback">GitHub のリポジトリ</a>をダウンロードし、展開します。</li>
+      <li>Chrome では <code>chrome://extensions</code>、Edge では <code>edge://extensions</code> を開きます。</li>
+      <li>「デベロッパー モード」をオンにします。</li>
+      <li>「パッケージ化されていない拡張機能を読み込む」（Edge では「展開して読み込み」）を押し、<code>extension</code> フォルダを選びます。</li>
+      <li>IRDB の資料の詳細ページ（例: <a href="https://irdb.nii.ac.jp/07496/0006016487">https://irdb.nii.ac.jp/07496/0006016487</a>）を開くと、表の上にリンクが表示されます。</li>
+    </ol>
+    <p>拡張機能のファイルを更新したときは、拡張機能の一覧で再読み込みのボタンを押してから、IRDB のページを開き直してください。</p>
+    <p>テストは、Node.js 標準のテストランナーで実行します（追加のインストールはありません）。</p>
+    <pre tabindex="0"><code>node --test extension/test/*.test.js</code></pre>
   </section>
 
   <section id="license">
@@ -310,7 +339,7 @@ footer p { margin: 0 0 4px; }
     <p><a href="https://creativecommons.org/publicdomain/zero/1.0/deed.ja">CC0 1.0 Universal</a>（パブリックドメイン提供）。</p>
 
     <h3>AI の利用</h3>
-    <p>このアプリケーションの作成や更新では、生成 AI によるコーディング支援を利用しています。</p>
+    <p>このアプリケーションの作成と更新には、生成 AI によるコーディング支援を利用しています。</p>
 
     <h3>作者</h3>
     <ul>
