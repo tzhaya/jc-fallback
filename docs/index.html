@@ -177,7 +177,7 @@ footer p { margin: 0 0 4px; }
     <h1>JAIRO Cloud メタデータ取得・検索ツール</h1>
     <p>JAIRO Cloud が停止している間の応急手段として作成した、機関リポジトリの本文 PDF の保存状況を調べるツールです。</p>
     <div class="actions">
-      <a class="button" href="sample/view.html">サンプルを開く</a>
+      <a class="button" href="sample/viewer_public.html">サンプルを開く</a>
       <a href="https://github.com/tzhaya/jc-fallback">GitHub のリポジトリ</a>
     </div>
   </div>
@@ -190,7 +190,7 @@ footer p { margin: 0 0 4px; }
       <li><a href="#notes">ご注意</a></li>
       <li><a href="#usage">使い方</a></li>
       <li><a href="#columns">取得する情報</a></li>
-      <li><a href="#viewer">viewer.html の設置</a></li>
+      <li><a href="#viewer">閲覧ページの設置</a></li>
       <li><a href="#license">ライセンス</a></li>
     </ul>
   </div>
@@ -202,7 +202,7 @@ footer p { margin: 0 0 4px; }
     <h2>概要</h2>
     <p>機関リポジトリから IRDB にハーベストされたメタデータを取得します。</p>
     <p>このデータを元に、本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、CSV ファイルに出力します。
-    出力した CSV ファイルは、静的な HTML ページ（<code>viewer.html</code>）で簡易ですが検索できます。</p>
+    出力した CSV ファイルは、静的な HTML ページで簡易ですが検索できます。ページは、担当者向けの <code>viewer_staff.html</code> と、一般公開向けの <code>docs/sample/viewer_public.html</code> の2種類です。</p>
     <p>Python の標準ライブラリだけで動作し、追加のインストールは要りません。</p>
   </section>
 
@@ -214,6 +214,7 @@ footer p { margin: 0 0 4px; }
         <li>ランディングページが Wayback Machine に保存されていても、PDF ファイルは保存されていないことがあります。</li>
         <li>新しく登録されたアイテムほど保存されていない傾向があります。</li>
         <li>国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% が Wayback Machine に保存されていました。レコード番号が 2000900 未満のアイテムでは 95%、2000900 以上では 42% が保存されているなど、最近のアイテムが保存されていないようでした。</li>
+        <li>ライセンスは、Wayback Machine に保存された各アイテムのメタデータから判定します。メタデータが保存されていないアイテムは判定できません。国際農研のリポジトリ（906 件）で 2026-11-08 に確認したところ、メタデータを取得できたのは 677 件で、CC ライセンスと判定できたのは 34 件（うち PDF を取得できるものは 33 件）でした。</li>
         <li>提供されているファイルのライセンスやメタデータの詳細は、IRDB 上でご確認ください。</li>
         <li>取得した PDF の再公開及び他機関への提供は、元のファイルのライセンスに従ってください。Internet Archive の利用条件と、IRDB 上のメタデータに記述されたライセンス情報、また提供機関に確認してください。</li>
       </ul>
@@ -238,7 +239,8 @@ footer p { margin: 0 0 4px; }
           <tr><td><code>--host</code></td><td>対象リポジトリのホスト名（必須）</td></tr>
           <tr><td><code>--query</code></td><td>IRDB OpenSearch の <code>q</code>（既定: <code>--host</code> と同じ）</td></tr>
           <tr><td><code>--out</code></td><td>出力する CSV（既定: <code>wayback_fulltext.csv</code>）</td></tr>
-          <tr><td><code>--bulk</code></td><td><code>/record/</code> 配下を一括で分割取得して突き合わせる（アイテムが多いときに推奨）</td></tr>
+          <tr><td><code>--bulk</code> / <code>--no-bulk</code></td><td><code>/record/</code> 配下を一括で分割取得して突き合わせる（既定）。<code>--no-bulk</code> ではアイテムごとに照会する</td></tr>
+          <tr><td><code>--license</code> / <code>--no-license</code></td><td>Wayback に保存された各アイテムのメタデータ（WEKO3 の <code>export/json</code>）から、ライセンス情報を取得する（既定）。初回は数百件で数十分かかる。<code>--no-license</code> では取得せず、ライセンスの列を空にする。<code>--no-bulk</code> のときも取得しない</td></tr>
           <tr><td><code>--limit N</code></td><td>動作確認用に先頭 N 件だけ処理する</td></tr>
           <tr><td><code>--refresh</code></td><td>IRDB の一覧を取り直す</td></tr>
           <tr><td><code>--cache-dir</code></td><td>キャッシュの保存先（既定: <code>.wb_cache</code>）</td></tr>
@@ -252,8 +254,9 @@ footer p { margin: 0 0 4px; }
       <li>IRDB の <a href="https://support.irdb.nii.ac.jp/ja/about/manual/opensearch">OpenSearch API</a> で、対象ホストのアイテムを列挙します。</li>
       <li>本文 URL を Wayback Machine の CDX API に照会します。</li>
       <li>PDF ごとに、最新の保存を選びます。</li>
+      <li>Wayback に保存された各アイテムのメタデータを取得し、権利情報とファイルのライセンス種別から、CC ライセンスかどうかを判定します（<code>--no-license</code> のときは行いません）。</li>
     </ol>
-    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば取得済みの分は再利用されます。</p>
+    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば取得済みの分は再利用されます。ライセンス情報もキャッシュに残るため、2回目以降は Wayback に新しい保存が現れたアイテムだけを取り直します。図書館担当者の利用に限定する場合は、<code>--no-license</code> を付けるとライセンス情報の取得を省けます。</p>
     <p>Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待って再試行します。CDX の応答には、1回あたり20〜60秒かかることがあります。</p>
   </section>
 
@@ -274,6 +277,9 @@ footer p { margin: 0 0 4px; }
           <tr><td><code>n_captures</code></td><td>そのファイルの保存回数</td></tr>
           <tr><td><code>item_files_captured</code></td><td>そのアイテムで保存を確認できた PDF の数</td></tr>
           <tr><td><code>archive_url</code></td><td>Wayback Machine 上の PDF ファイルの URL（<code>…/web/{timestamp}id_/{original}</code>）</td></tr>
+          <tr><td><code>license_status</code></td><td><code>--no-license</code> / <code>--no-bulk</code> のときは空。<code>cc</code>（CC ライセンス。NC や ND の条件が付くものも含む）/ <code>check</code>（要確認。権利情報とファイルのライセンス種別が食い違う）/ <code>not_cc</code>（権利情報はあるが CC ではない）/ <code>no_rights</code>（権利情報なし）/ <code>no_json</code>（メタデータを取得できない）</td></tr>
+          <tr><td class="wrap-first"><code>license</code>, <code>rights</code>, <code>rights_uri</code>, <code>licensetype</code></td><td>判定した CC ライセンスの名前（例: <code>CC BY 4.0</code>）、権利情報の本文と URI、ファイルのライセンス種別（WEKO3 の値）</td></tr>
+          <tr><td class="wrap-first"><code>license_capture_date</code>, <code>license_source_url</code></td><td>判定に使ったメタデータの保存日と、Wayback Machine 上の URL</td></tr>
         </tbody>
       </table>
     </div>
@@ -284,14 +290,19 @@ footer p { margin: 0 0 4px; }
   </section>
 
   <section id="viewer">
-    <h2>viewer.html の設置</h2>
-    <p><code>viewer.html</code> は、CSV を表示してテキストボックスの入力で絞り込む単体のページです。外部のライブラリは使いません。</p>
+    <h2>閲覧ページの設置</h2>
+    <p>閲覧ページは、CSV を表示してテキストボックスの入力で絞り込む単体のページです。外部のライブラリは使いません。用途に応じて、次の2種類を使い分けます。</p>
+    <ul>
+      <li><code>viewer_staff.html</code>（担当者向け）：すべての PDF へのリンクと、ライセンスの判定結果を表示します。「CC ライセンスのものだけを表示する」で絞り込めます。</li>
+      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では CC ライセンスのものだけを表示します。冒頭のサンプルの説明は書き換えてください。</li>
+    </ul>
+    <p>一般公開向けのページには、ライセンス情報を含む CSV（<code>--no-license</code> も <code>--no-bulk</code> も付けずに出力したもの）を使います。ライセンスの列が無いか空の CSV では、PDF へのリンクを1件も表示しません。</p>
     <ol>
-      <li>任意の Web サーバー（機関の Web サーバーや GitHub Pages など）に、<code>viewer.html</code> と出力した CSV を同じフォルダに置きます。CSV のファイル名は <code>result.csv</code> にします。</li>
-      <li><code>viewer.html</code> を開くと、同じ場所の <code>result.csv</code> を自動で読み込みます。</li>
+      <li>任意の Web サーバー（機関の Web サーバーや GitHub Pages など）に、閲覧ページと出力した CSV を同じフォルダに置きます。CSV のファイル名は <code>result.csv</code> にします。</li>
+      <li>閲覧ページを開くと、同じ場所の <code>result.csv</code> を自動で読み込みます。</li>
     </ol>
-    <p><code>viewer.html</code> をファイルとして直接開いた場合は、ブラウザの制限により CSV を自動では読み込めません。画面の「CSV ファイルを選択」から選ぶか、ドラッグ&amp;ドロップで渡してください。ファイルは端末の中だけで処理され、送信されません。</p>
-    <p>国際農研のデータを使ったサンプルを、<a href="sample/view.html">このサイトで公開しています</a>。</p>
+    <p>閲覧ページをファイルとして直接開いた場合は、ブラウザの制限により CSV を自動では読み込めません。画面の「CSV ファイルを選択」から選ぶか、ドラッグ&amp;ドロップで渡してください。ファイルは端末の中だけで処理され、送信されません。</p>
+    <p>国際農研のデータを使ったサンプルを、<a href="sample/viewer_public.html">このサイトで公開しています</a>。</p>
   </section>
 
   <section id="license">

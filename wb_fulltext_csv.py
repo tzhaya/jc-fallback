@@ -17,8 +17,14 @@ Wayback Machine 上の最新アーカイブ URL を CSV に出力する（標準
 
 使い方:
   WB_CONTACT="連絡先(任意)" python3 wb_fulltext_csv.py --host jircas.repo.nii.ac.jp --out result.csv
-  python3 wb_fulltext_csv.py --host HOST --limit 20 --out smoke.csv   # スモーク
-  python3 wb_fulltext_csv.py --host HOST --bulk --out result.csv      # 一括取得（レコードごとの照会より少ない回数で済む）
+  python3 wb_fulltext_csv.py --host HOST --no-license --out result.csv  # ライセンス情報を取得しない（速い）
+  python3 wb_fulltext_csv.py --host HOST --no-bulk --out result.csv     # レコードごとに CDX を照会する
+  python3 wb_fulltext_csv.py --host HOST --limit 20 --out smoke.csv     # スモーク
+既定は --bulk（/record/ 配下の一括取得）と --license（ライセンス情報の取得）。
+--license は、Wayback に保存された WEKO3 の /records/{id}/export/json を 1 件ずつ取得し、
+権利情報とファイルの licensetype から CC ライセンスかどうかを判定する（初回は数百件で数十分かかる。
+結果はキャッシュし、2 回目以降は新しい保存が現れたものだけ取り直す）。--no-license では
+ライセンスの列を空にする。--no-bulk のときもライセンス情報は取得しない。
 --host は対象リポジトリのホスト（必須）。--query（IRDB の q）の既定は --host と同じ。
 中断しても、同じ --cache-dir で再実行すれば取得済みの分は再利用される。
 キャッシュは検索条件（IRDB 一覧）とホスト（CDX）ごとに識別され、条件が違えば再利用しない。
@@ -28,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 import os
 import re
@@ -60,7 +67,19 @@ CSV_COLUMNS = [
     "status", "title", *PRISM_FIELDS, "updated", "irdb_url", "record_url", "record_id",
     "file_url", "capture_timestamp", "capture_date", "mimetype", "length",
     "n_captures", "item_files_captured", "archive_url",
+    *("license_status", "license", "rights", "rights_uri", "licensetype",
+      "license_capture_date", "license_source_url"),
 ]
+
+# WEKO3 のファイル情報の licensetype のうち CC のもの（NC/ND 付きも CC として扱う）。
+# license_no（なし）・license_free（自由入力）・license_note（つくばで実測）などは CC ではない。
+CC_LICENSETYPES = {
+    "license_0": "CC BY 4.0", "license_1": "CC BY-SA 4.0", "license_2": "CC BY-ND 4.0",
+    "license_3": "CC BY-NC 4.0", "license_4": "CC BY-NC-SA 4.0", "license_5": "CC BY-NC-ND 4.0",
+    "license_6": "CC BY 3.0", "license_7": "CC BY-SA 3.0", "license_8": "CC BY-ND 3.0",
+    "license_9": "CC BY-NC 3.0", "license_10": "CC BY-NC-SA 3.0", "license_11": "CC BY-NC-ND 3.0",
+    "license_12": "CC0 1.0",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +275,159 @@ def summarize(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
     return by_status, pdf_files
 
 
+# ---------------------------------------------------------------------------
+# ライセンス情報（Wayback に保存された WEKO3 の /records/{id}/export/json から読む）
+# ---------------------------------------------------------------------------
+
+_EXPORT_JSON_RE = re.compile(r"^/records/(\d+)/export/json$")
+
+
+def group_export_json(rows: Iterable[dict]) -> Dict[str, List[dict]]:
+    """`/records/{id}/export/json` の有効な capture（200、length が正）をレコードごとに新しい順で返す。
+
+    `--bulk` の `/record/` 配下の一括取得には、`/records/…` の行も含まれる（実測）。
+    """
+    grouped: Dict[str, List[dict]] = {}
+    for r in rows:
+        m = _EXPORT_JSON_RE.match(urllib.parse.urlsplit(r.get("original", "")).path)
+        if m and str(r.get("statuscode")) == "200" and has_valid_length(r):
+            grouped.setdefault(m.group(1), []).append(r)
+    for caps in grouped.values():
+        caps.sort(key=lambda r: r["timestamp"], reverse=True)
+    return grouped
+
+
+def extract_license_info(record: dict) -> dict:
+    """export JSON から、権利情報とファイルごとの licensetype を取り出す。
+
+    プロパティキー（`item_30002_rights6`、`item_5_rights_12`、`item_1742563285404` など）は
+    リポジトリやアイテムタイプごとに違うので使わない。次のサブフィールドで見分ける。
+      - 権利情報: `attribute_value_mlt` の要素に `subitem_rights` か `subitem_rights_resource` がある
+      - ファイル情報: `attribute_type` が `file`
+    表示名（`attribute_name`）は編集できるので使わない。
+    """
+    meta = record.get("metadata") if isinstance(record, dict) else None
+    rights: List[dict] = []
+    files: List[dict] = []
+    if not isinstance(meta, dict):
+        return {"rights": rights, "files": files}
+    for v in meta.values():
+        if not isinstance(v, dict):
+            continue
+        vals = [x for x in (v.get("attribute_value_mlt") or []) if isinstance(x, dict)]
+        if v.get("attribute_type") == "file":
+            files += [{"filename": str(x.get("filename") or ""),
+                       "licensetype": str(x.get("licensetype") or "")} for x in vals]
+            continue
+        for x in vals:
+            if "subitem_rights" in x or "subitem_rights_resource" in x:
+                text = str(x.get("subitem_rights") or "").strip()
+                uri = str(x.get("subitem_rights_resource") or "").strip()
+                if text or uri:
+                    rights.append({"text": text, "uri": uri})
+    return {"rights": rights, "files": files}
+
+
+_CC_URL_RE = re.compile(
+    r"creativecommons\.org/(?:licenses/([a-z]+(?:-[a-z]+)*)|publicdomain/(zero))/(\d+(?:\.\d+)?)",
+    re.I)
+
+
+def cc_license_name(s: str) -> Optional[str]:
+    """文字列中の CC の URL から `CC BY-NC-ND 4.0` / `CC0 1.0` のような名前を返す。無ければ None。
+
+    http/https、`/deed.en`・`/deed/en`・末尾スラッシュの有無は問わない。権利情報の本文に URL だけを
+    書いている例（実測）もあるので、URI 欄に限らず本文も対象にする。
+    """
+    m = _CC_URL_RE.search(s or "")
+    if not m:
+        return None
+    if m.group(2):
+        return f"CC0 {m.group(3)}"
+    return f"CC {m.group(1).upper()} {m.group(3)}"
+
+
+def license_for_file(info: Optional[dict], filename: Optional[str]) -> dict:
+    """1 行分のライセンス列を作る。`filename` が None なら、そのアイテムの PDF 全体で判定する。
+
+    license_status:
+      cc        権利情報の CC URL か、ファイルの licensetype が CC で、互いに矛盾しない
+      check     要確認（CC の種類が食い違う、または licensetype が license_no なのに権利情報が CC）
+      not_cc    権利情報はあるが CC ではない
+      no_rights 権利情報もなく、licensetype も CC ではない
+      no_json   export JSON を取得できなかった
+    """
+    if info is None:
+        return {"license_status": "no_json"}
+    rights = info.get("rights", [])
+    files = info.get("files", [])
+    if filename is None:
+        targets = [f for f in files if f["filename"].lower().endswith(".pdf")]
+    else:
+        targets = [f for f in files if f["filename"] == filename]
+    types = sorted({f["licensetype"] for f in targets if f["licensetype"]})
+    names = {n for r in rights for n in (cc_license_name(r["uri"]), cc_license_name(r["text"])) if n}
+    rights_cc = bool(names)
+    names |= {CC_LICENSETYPES[t] for t in types if t in CC_LICENSETYPES}
+    if len(names) > 1 or (rights_cc and "license_no" in types):
+        status = "check"
+    elif names:
+        status = "cc"
+    elif rights:
+        status = "not_cc"
+    else:
+        status = "no_rights"
+    return {
+        "license_status": status,
+        "license": " / ".join(sorted(names)),
+        "rights": " | ".join(r["text"] for r in rights if r["text"]),
+        "rights_uri": " | ".join(r["uri"] for r in rights if r["uri"]),
+        "licensetype": " | ".join(types),
+    }
+
+
+def add_license_columns(rows: List[dict], lic: Optional[dict]) -> List[dict]:
+    """build_rows の行に、ライセンス列を足す。`lic` はキャッシュの 1 レコード分（無ければ None）。"""
+    info = lic.get("info") if lic else None
+    extra = {}
+    if info is not None:
+        extra = {"license_capture_date": capture_date(lic["timestamp"]),
+                 "license_source_url": archive_url(lic["timestamp"], lic["original"])}
+    out = []
+    for r in rows:
+        fname = None
+        if r.get("file_url"):
+            fname = urllib.parse.unquote(urllib.parse.urlsplit(r["file_url"]).path.rsplit("/", 1)[-1])
+        out.append({**r, **license_for_file(info, fname), **extra})
+    return out
+
+
+def decode_body(data: bytes, content_encoding: str = "") -> str:
+    """応答本文を文字列にする。Wayback は原本の `Content-Encoding: gzip` のまま返すことがある（実測）。"""
+    if "gzip" in (content_encoding or "").lower() or data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    return data.decode("utf-8")
+
+
+def summarize_licenses(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
+    """(アイテム単位の license_status 内訳, PDF の保存があり CC の行を持つアイテム数) を返す。
+
+    アイテムの代表値は、CC の行があれば cc、なければ最初の行の値とする。
+    """
+    item: Dict[str, str] = {}
+    ok_cc = set()
+    for r in rows:
+        st = r.get("license_status", "")
+        if r["record_id"] not in item or st == "cc":
+            item[r["record_id"]] = st
+        if st == "cc" and r["status"] == "ok":
+            ok_cc.add(r["record_id"])
+    by: Dict[str, int] = {}
+    for st in item.values():
+        by[st] = by.get(st, 0) + 1
+    return by, len(ok_cc)
+
+
 def write_csv(path: Path, rows: Iterable[dict]) -> None:
     # Excel で文字化けしないよう BOM 付き UTF-8
     with path.open("w", encoding="utf-8-sig", newline="") as f:
@@ -287,7 +459,7 @@ class Http:
             try:
                 req = urllib.request.Request(url, headers=self.headers)
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    return resp.read().decode("utf-8")
+                    return decode_body(resp.read(), resp.headers.get("Content-Encoding", ""))
             except urllib.error.HTTPError as e:
                 if e.code in (429, 500, 502, 503, 504) and attempt < retries:
                     ra = e.headers.get("Retry-After") if e.headers else None
@@ -347,6 +519,28 @@ def fetch_entries(http: Http, query: str, count: int = 100) -> List[dict]:
         if len(entries) >= total:
             break
     return entries
+
+
+def fetch_entries_complete(http: Http, query: str, passes: int = 5) -> List[dict]:
+    """一覧を最大 `passes` 回取り、IRDB 詳細ページ URL で和集合をとる。
+
+    IRDB の並びは同順位（`updated` が同じ日のものが 98%）の間で要求ごとに入れ替わるらしく、
+    ページ送りで重複と欠落が同数出る（2026-11-08 に 2 回続けて 36 件）。取り直すたびに欠落する
+    アイテムが変わるので、重ね合わせれば揃う。重複のない件数が 1 回目の件数に達したら止める。
+    `passes` 回取っても揃わなければ IncompleteListing（重複を除いた後なので、main の重複チェック
+    では欠落に気付けない。不完全な一覧をキャッシュしないよう、ここで失敗にする）。
+    """
+    merged: Dict[str, dict] = {}
+    expected = 0
+    for n in range(1, passes + 1):
+        page = fetch_entries(http, query)
+        expected = expected or len(page)
+        for e in page:
+            merged.setdefault(e.get("irdb_url", ""), e)
+        info(f"IRDB 一覧 {n} 回目: 重複を除いて {len(merged)}/{expected} 件")
+        if len(merged) >= expected:
+            return list(merged.values())
+    raise IncompleteListing(f"{passes} 回取得しても {len(merged)}/{expected} 件しか揃わない")
 
 
 ENTRIES_CACHE_VERSION = 2
@@ -502,7 +696,97 @@ def load_cdx_cache(path: Path, host: str) -> Dict[str, List[dict]]:
     return cache
 
 
-def main() -> int:
+EXPORT_TRIES = 3        # 1 レコードで試す capture の数（新しい順）
+EXPORT_TIMEOUT = 90
+
+
+def load_license_cache(path: Path, host: str) -> Dict[str, dict]:
+    """export JSON の取得結果のキャッシュ。1 行 1 レコード {host, rid, latest, timestamp, original, info}。
+
+    `latest` は取得時点で最新だった capture の timestamp。CDX に新しい capture が現れたら取り直す。
+    `info` が null の行は、試したすべての capture が 404 か JSON でなかったもの。
+    """
+    cache: Dict[str, dict] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # 中断で壊れた末尾行
+            if isinstance(obj, dict) and obj.get("host") == host and "rid" in obj:
+                cache[obj["rid"]] = obj
+    return cache
+
+
+def fetch_license(http: Http, host: str, rid: str, caps: List[dict]) -> Optional[dict]:
+    """新しい capture から順に export JSON を取り、キャッシュに書く 1 行を返す。
+
+    404 や JSON でない応答は次の capture へ進む。通信エラーが残った場合は None
+    （キャッシュせず、次回の実行で取り直す）。
+
+    `latest` は「ここまでは確定的に処理した」capture の timestamp。新しい capture が通信エラーで
+    取れず、古い capture で判定した場合は、使った capture の timestamp を入れる。CDX の最新と一致
+    しないので、次回の実行で新しい capture を取り直す（古い権利情報のまま固定しないため）。
+    """
+    transient = False
+    for c in caps[:EXPORT_TRIES]:
+        try:
+            text = http.get(archive_url(c["timestamp"], c["original"]), retries=3,
+                            timeout=EXPORT_TIMEOUT)
+        except urllib.error.HTTPError as e:
+            if e.code in (404, 410):
+                continue
+            transient = True
+            continue
+        except Exception:  # noqa: BLE001 - 通信エラーは次回に回す
+            transient = True
+            continue
+        try:
+            record = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict) or not isinstance(record.get("metadata"), dict):
+            continue
+        return {"host": host, "rid": rid,
+                "latest": c["timestamp"] if transient else caps[0]["timestamp"],
+                "timestamp": c["timestamp"], "original": c["original"],
+                "info": extract_license_info(record)}
+    if transient:
+        return None
+    return {"host": host, "rid": rid, "latest": caps[0]["timestamp"], "info": None}
+
+
+def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[str, List[dict]],
+                     cache_path: Path) -> Tuple[Dict[str, dict], int]:
+    """対象レコードのライセンス情報を集める。(rid → キャッシュ行, 通信エラーで未取得の件数)。"""
+    repair_jsonl_tail(cache_path)
+    cache = load_license_cache(cache_path, host)
+    todo = [r for r in rids if r in export_caps
+            and cache.get(r, {}).get("latest") != export_caps[r][0]["timestamp"]]
+    if todo:
+        info(f"export JSON: {len(todo)} 件を取得します（1 件あたり数秒。中断しても続きから進みます）")
+    errors = 0
+    with cache_path.open("a", encoding="utf-8") as cf:
+        for i, rid in enumerate(todo, 1):
+            obj = fetch_license(http, host, rid, export_caps[rid])
+            if obj is None:
+                errors += 1
+                # 以前の取得結果があれば、古くてもそれを使う
+                warn(f"record {rid}: export JSON の取得に失敗（次回の実行で取り直します）")
+                continue
+            cf.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            cf.flush()
+            cache[rid] = obj
+            if obj["latest"] != export_caps[rid][0]["timestamp"]:
+                errors += 1
+                warn(f"record {rid}: 最新の export JSON を取得できず、古い保存で判定しました"
+                     "（次回の実行で取り直します）")
+            if i % 50 == 0:
+                info(f"export JSON: {i}/{len(todo)} 件")
+    return {r: cache[r] for r in rids if r in cache and r in export_caps}, errors
+
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", required=True,
@@ -515,11 +799,23 @@ def main() -> int:
     ap.add_argument("--interval", type=float, default=1.0, help="リクエスト間隔（秒）")
     ap.add_argument("--limit", type=int, default=0, help="スモーク用: 先頭 N 件のみ")
     ap.add_argument("--refresh", action="store_true", help="IRDB の一覧を取り直す")
-    ap.add_argument("--bulk", action="store_true",
-                    help="レコードごとの照会ではなく、/record/ 配下を一括で分割取得して突き合わせる")
+    ap.add_argument("--bulk", action=argparse.BooleanOptionalAction, default=True,
+                    help="/record/ 配下を一括で分割取得して突き合わせる（既定）。"
+                         "--no-bulk でレコードごとに照会する")
     ap.add_argument("--bulk-page-size", type=int, default=BULK_PAGE_SIZE,
                     help=f"--bulk の 1 回あたり取得行数（既定 {BULK_PAGE_SIZE}）")
-    args = ap.parse_args()
+    ap.add_argument("--license", action=argparse.BooleanOptionalAction, default=True,
+                    help="Wayback に保存された export JSON からライセンス情報を取得する（既定）。"
+                         "--no-license で取得せず、ライセンスの列を空にする。--bulk のときだけ有効")
+    return ap
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.license and not args.bulk:
+        # export JSON の保存先は、一括取得した CDX の一覧から探すため
+        warn("--no-bulk のときはライセンス情報を取得しません（ライセンスの列は空になります）")
+        args.license = False
     host = args.host.strip().lower()
     query = args.query if args.query else host
 
@@ -537,7 +833,7 @@ def main() -> int:
             info(f"IRDB 一覧をキャッシュから読み込み: {len(entries)} 件")
     if entries is None:
         try:
-            entries = fetch_entries(http, query)
+            entries = fetch_entries_complete(http, query)
         except IncompleteListing as ex:
             # 不完全な一覧はキャッシュしない
             warn(f"IRDB 一覧が不完全です ({ex})。キャッシュせず終了します。再実行してください")
@@ -561,15 +857,23 @@ def main() -> int:
         targets = targets[:args.limit]
 
     bulk: Optional[Dict[str, List[dict]]] = None
+    licenses: Optional[Dict[str, dict]] = None
+    license_errors = 0
     if args.bulk:
         try:
-            bulk = group_by_record(fetch_bulk(http, host, cache_dir / "cdx_bulk.jsonl",
-                                              args.bulk_page_size))
+            bulk_rows = fetch_bulk(http, host, cache_dir / "cdx_bulk.jsonl", args.bulk_page_size)
         except Exception as ex:  # noqa: BLE001
             # 取得が不完全なまま突き合わせると、保存済みを no_capture と誤判定する
             warn(f"バルク取得に失敗 ({ex})。CSV は出力しません。同じコマンドで再実行すると続きから進みます")
             return 1
+        bulk = group_by_record(bulk_rows)
         info(f"バルク取得: {len(bulk)} レコード分")
+        if args.license:
+            export_caps = group_export_json(bulk_rows)
+            info(f"export JSON の保存があるレコード: {len(export_caps)} 件")
+            licenses, license_errors = collect_licenses(
+                http, host, [rid for _, rid in targets], export_caps,
+                cache_dir / "export_json.jsonl")
 
     cdx_cache_path = cache_dir / "cdx.jsonl"
     repair_jsonl_tail(cdx_cache_path)  # 読み込みより先に（UTF-8 の途中で切れていても読めるようにする）
@@ -594,7 +898,10 @@ def main() -> int:
                 cf.write(json.dumps({"host": host, "rid": rid, "rows": rows},
                                     ensure_ascii=False) + "\n")
                 cf.flush()
-            out_rows.extend(build_rows(entry, rid, rows))
+            item_rows = build_rows(entry, rid, rows)
+            if licenses is not None:
+                item_rows = add_license_columns(item_rows, licenses.get(rid))
+            out_rows.extend(item_rows)
             if i % 50 == 0:
                 info(f"CDX: {i}/{len(targets)} 件")
 
@@ -611,8 +918,15 @@ def main() -> int:
         info(f"アイテム単位の保存確認率: {ok_items}/{judged} = {ok_items / judged:.1%}"
              "（1 件でも PDF の保存を確認できたアイテム。部分保存は検出できない）")
     info(f"ファイル単位: 保存を確認できた PDF {pdf_files} 件（ok の行数）")
+    if licenses is not None:
+        by_lic, ok_cc = summarize_licenses(out_rows)
+        info("ライセンス（アイテム単位）: "
+             + ", ".join(f"{k}={v}" for k, v in sorted(by_lic.items())))
+        info(f"PDF の保存があり、ライセンスが CC のアイテム: {ok_cc} 件")
     if errors:
         warn(f"CDX 照会の失敗 {errors} 件。同じコマンドで再実行すると、失敗分だけ取り直します")
+    if license_errors:
+        warn(f"export JSON の取得失敗 {license_errors} 件。同じコマンドで再実行すると、失敗分だけ取り直します")
     return 0
 
 

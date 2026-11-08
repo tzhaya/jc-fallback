@@ -175,6 +175,19 @@ td.links a + a { margin-top: 4px; }
 .label.no_capture { color: var(--gray-800); }
 .label.no_pdf { color: var(--orange-800); }
 .label.cdx_error { color: var(--red-900); }
+.label.lic-cc { color: var(--green-800); }
+.label.lic-check { color: var(--orange-800); }
+.label.lic-other { color: var(--gray-800); }
+td.license { min-width: 180px; font-size: 14px; line-height: 1.6; }
+td.license .file { display: block; margin-top: 4px; color: var(--gray-800); }
+td.license details { margin-top: 4px; }
+td.license summary { cursor: pointer; color: var(--blue-1000); }
+td.license details p { margin: 4px 0 0; word-break: break-word; }
+td.links .nolink { display: block; font-size: 14px; line-height: 1.6; color: var(--gray-800); max-width: 14em; white-space: normal; }
+
+.options { margin: 16px 0 0; }
+.options label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.options input[type="checkbox"] { width: 20px; height: 20px; margin: 0; accent-color: var(--blue-900); }
 
 .empty { padding: 32px 16px; text-align: center; color: var(--gray-800); }
 
@@ -209,6 +222,9 @@ footer p { margin: 0 0 4px; }
     <p class="hint" id="q-hint">タイトル、刊行物名、レコード番号、ファイル名などから検索します。空白で区切ると、すべてを含むものだけに絞り込みます。全角・半角と英字の大小は区別しません。</p>
     <input id="q" type="search" autocomplete="off" aria-describedby="q-hint" disabled>
   </div>
+  <div class="options">
+    <label><input id="cc-only" type="checkbox" disabled> CC ライセンスのものだけを表示する</label>
+  </div>
 
   <p class="status-line" id="count" role="status" aria-live="polite">読み込み中です…</p>
 
@@ -233,6 +249,7 @@ footer p { margin: 0 0 4px; }
           <th scope="col">掲載誌</th>
           <th scope="col">刊行年月</th>
           <th scope="col">レコード番号</th>
+          <th scope="col">ライセンス</th>
           <th scope="col">保存日</th>
           <th scope="col">リンク</th>
         </tr>
@@ -247,6 +264,7 @@ footer p { margin: 0 0 4px; }
   <div class="container">
     <p>取得した PDF の再公開及び他機関への提供は、元のファイルのライセンスに従ってください。Internet Archive の利用条件と、IRDB上のメタデータに記述されたライセンス情報、また提供機関に確認してください。</p>
     <p>「取得可」は、Wayback Machine に PDF の保存を確認できたことを示します。複数ファイルのうち一部だけが保存されている場合は区別できません。</p>
+    <p>ライセンスは、Wayback Machine に保存されたリポジトリのメタデータ（権利情報と、ファイルごとのライセンス種別）から判定しています。保存されたメタデータが古い場合や、保存されていない場合があります。「要確認」は、2つの情報が食い違うものです。</p>
     <p>表示されているメタデータとリンクはデータ取得時点のものです。変更されている場合があります。</p>
   </div>
 </footer>
@@ -263,12 +281,22 @@ footer p { margin: 0 0 4px; }
     cdx_error: "照会エラー"
   };
 
+  /* 一般公開用は true。CC ライセンスを確認できた PDF だけに Wayback へのリンクを出す */
+  var PUBLIC = false;
+  var LICENSE_LABELS = {
+    check: "要確認",
+    not_cc: "CC以外",
+    no_rights: "権利情報なし",
+    no_json: "未確認"
+  };
+
   var $ = function (id) { return document.getElementById(id); };
   var els = {
     q: $("q"), count: $("count"), error: $("error"), errorMsg: $("error-msg"),
     picker: $("picker"), file: $("file"), wrap: $("table-wrap"),
-    rows: $("rows"), empty: $("empty"), caption: $("caption")
+    rows: $("rows"), empty: $("empty"), caption: $("caption"), ccOnly: $("cc-only")
   };
+  if (PUBLIC) els.ccOnly.checked = true;
 
   var records = [];   // {row, haystack}
   var timer = null;
@@ -328,9 +356,11 @@ footer p { margin: 0 0 4px; }
       o._file = fileName(o.file_url);
       var parts = Object.keys(o).map(function (k) { return o[k]; });
       parts.push(LABELS[o.status] || "");
+      parts.push(LICENSE_LABELS[o.license_status] || "");
       return { row: o, haystack: normalize(parts.join("\n")) };
     });
     els.q.disabled = false;
+    els.ccOnly.disabled = false;
     els.error.hidden = true;
     els.picker.hidden = true;
     els.wrap.hidden = false;
@@ -339,8 +369,9 @@ footer p { margin: 0 0 4px; }
 
   function filtered() {
     var terms = normalize(els.q.value).split(/\s+/).filter(Boolean);
-    if (!terms.length) return records;
+    var ccOnly = els.ccOnly.checked;
     return records.filter(function (rec) {
+      if (ccOnly && rec.row.license_status !== "cc") return false;
       return terms.every(function (t) { return rec.haystack.indexOf(t) !== -1; });
     });
   }
@@ -398,16 +429,61 @@ footer p { margin: 0 0 4px; }
 
     tr.appendChild(td("num", o.publicationDate));
     tr.appendChild(td("num", o.record_id));
+    tr.appendChild(td("license", licenseCell(o)));
     tr.appendChild(td("num", o.capture_date));
 
+    var isCc = o.license_status === "cc";
     var links = document.createElement("div");
-    [[o.archive_url, "Wayback の PDF"], [o.record_url, "リポジトリ詳細"], [o.irdb_url, "IRDB 詳細"]]
-      .forEach(function (p) {
-        var a = link(p[0], p[1]);
-        if (a) links.appendChild(a);
-      });
+    var items = [[o.archive_url, "Wayback の PDF"], [o.record_url, "リポジトリ詳細"], [o.irdb_url, "IRDB 詳細"]];
+    if (PUBLIC && !isCc) items = items.slice(1);
+    if (!PUBLIC) items.push([o.license_source_url, "ライセンスの確認元"]);
+    if (PUBLIC && !isCc && o.archive_url) {
+      var n = document.createElement("span");
+      n.className = "nolink";
+      n.textContent = "CC ライセンスを確認できないため、PDF へのリンクは表示しません";
+      links.appendChild(n);
+    }
+    items.forEach(function (p) {
+      var a = link(p[0], p[1]);
+      if (a) links.appendChild(a);
+    });
     tr.appendChild(td("links", links));
     return tr;
+  }
+
+  function licenseCell(o) {
+    var box = document.createElement("div");
+    var label = document.createElement("span");
+    if (o.license_status === "cc") {
+      label.className = "label lic-cc";
+      label.textContent = o.license || "CC";
+    } else if (LICENSE_LABELS[o.license_status]) {
+      label.className = "label " + (o.license_status === "check" ? "lic-check" : "lic-other");
+      label.textContent = LICENSE_LABELS[o.license_status];
+    } else {
+      label.textContent = "—";
+    }
+    box.appendChild(label);
+    if (o.license_status === "check" && o.license) {
+      var c = document.createElement("span");
+      c.className = "file";
+      c.textContent = o.license;
+      box.appendChild(c);
+    }
+    if (o.rights || o.rights_uri) {
+      var d = document.createElement("details");
+      var s = document.createElement("summary");
+      s.textContent = "権利表示";
+      d.appendChild(s);
+      [o.rights, o.rights_uri].forEach(function (t) {
+        if (!t) return;
+        var p = document.createElement("p");
+        p.textContent = t;
+        d.appendChild(p);
+      });
+      box.appendChild(d);
+    }
+    return box;
   }
 
   function render() {
@@ -464,6 +540,7 @@ footer p { margin: 0 0 4px; }
     clearTimeout(timer);
     timer = setTimeout(render, 120);
   });
+  els.ccOnly.addEventListener("change", render);
   els.file.addEventListener("change", function () {
     if (els.file.files[0]) readFile(els.file.files[0]);
   });
