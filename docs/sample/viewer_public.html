@@ -181,6 +181,11 @@ td.links a + a { margin-top: 4px; }
 .label.int-single, .label.int-unknown { color: var(--gray-800); }
 td.capture { white-space: nowrap; }
 td.capture .note { display: block; margin-top: 4px; max-width: 14em; font-size: 14px; line-height: 1.6; color: var(--gray-800); white-space: normal; }
+/* 途中で切れている可能性（Issue #7） */
+.trunc { display: block; margin-top: 4px; min-width: 13em; max-width: 16em; font-size: 14px; line-height: 1.6; white-space: normal; }
+.trunc span { display: block; color: var(--gray-800); }
+.trunc .trunc-warning { color: var(--orange-800); font-weight: 700; }
+td.capture .trunc a, td.links .trunc a { display: block; margin-top: 4px; }
 .label.lic-cc { color: var(--green-800); }
 .label.lic-check { color: var(--orange-800); }
 .label.lic-other { color: var(--gray-800); }
@@ -273,6 +278,7 @@ footer p { margin: 0 0 4px; }
     <p>PDF へのリンクは Internet Archive の Wayback Machine 上のファイルです。Internet Archive の利用条件にも従ってください。</p>
     <p>「取得可」は、Wayback Machine に PDF の保存を確認できたことを示します。複数ファイルのうち一部だけが保存されている場合は区別できません。</p>
     <p>「基準日時以降のみ」は、データの作成時に指定した日時より後の保存しか無く、リンクを出していない PDF です。</p>
+    <p>「保存が途中で切れている可能性があります」は、リンク先の保存版より保存データが大きい、別の保存版があるものです。Wayback Machine は大きなファイルを途中までしか保存しないことがあり、途中で切れた版は PDF として開けないことがあります。保存データの長さからの推定なので、ファイルの差し替えなどでも表示されます。開けないときは「別の保存版」を試してください（完全な版であることは保証しません）。</p>
     <p>ライセンスは、Wayback Machine に保存されたリポジトリのメタデータ（権利情報と、ファイルごとのライセンス種別）から判定しています。保存されたメタデータが古い場合や、保存されていない場合があります。「要確認」は、2つの情報が食い違うものです。</p>
     <p>表示されているメタデータとリンクはデータ取得時点のものです。変更されている場合があります。</p>
   </div>
@@ -306,6 +312,9 @@ footer p { margin: 0 0 4px; }
     single: "履歴不足",
     unknown: "判定不能"
   };
+
+  var TRUNC_WARNING = "保存が途中で切れている可能性があります";
+  var TRUNC_DETAIL = "保存データの長さからの推定です。ファイルの差し替えや、圧縮されたままの保存でも表示されます。";
 
   var $ = function (id) { return document.getElementById(id); };
   var els = {
@@ -375,6 +384,7 @@ footer p { margin: 0 0 4px; }
       parts.push(LABELS[o.status] || "");
       parts.push(LICENSE_LABELS[o.license_status] || "");
       if (!PUBLIC) parts.push(INTEGRITY_LABELS[o.integrity_status] || "");
+      if (showTruncation(o)) parts.push(TRUNC_WARNING);
       return { row: o, haystack: normalize(parts.join("\n")) };
     });
     els.q.disabled = false;
@@ -464,35 +474,76 @@ footer p { margin: 0 0 4px; }
     items.forEach(function (p) {
       var a = link(p[0], p[1]);
       if (a) links.appendChild(a);
+      /* 一般向けは、PDF へのリンクの直後に注意と別の保存版を出す（CC の行だけ） */
+      if (a && PUBLIC && p[0] === o.archive_url && showTruncation(o)) links.appendChild(truncationBox(o));
     });
     tr.appendChild(td("links", links));
     return tr;
+  }
+
+  /*
+   * 途中で切れている可能性（Issue #7）。採用した保存版が、digest の違う保存版より小さいもの。
+   * 採用は変えず、注意と、基準日時より前の大きい保存版（alt_archive_url）へのリンクを出す。
+   * 一般向けは、PDF へのリンクを出す行（CC）だけ。新しい列の無い旧 CSV では何も出さない。
+   */
+  function showTruncation(o) {
+    if (o.possibly_truncated !== "1" || o.status !== "ok") return false;
+    return !PUBLIC || o.license_status === "cc";
+  }
+
+  function truncationBox(o) {
+    var box = document.createElement("div");
+    box.className = "trunc";
+    function text(cls, s) {
+      var e = document.createElement("span");
+      if (cls) e.className = cls;
+      e.textContent = s;
+      box.appendChild(e);
+    }
+    text("trunc-warning", TRUNC_WARNING);
+    text("", TRUNC_DETAIL);
+    var a = link(o.alt_archive_url, "別の保存版（" + (o.alt_capture_date || "日付不明") + "）");
+    if (a) {
+      text("", "開けないときは、別の保存版を試してください。");
+      box.appendChild(a);
+      /* 同じ日の中の時刻の違いは区別しない（CSV の列は日付だけ） */
+      if (!PUBLIC && o.larger_capture_date && o.larger_capture_date !== o.alt_capture_date) {
+        text("", "全期間で最大の保存: " + o.larger_capture_date + "（基準日時以降）");
+      }
+    } else if (o.larger_capture_date) {
+      text("", "より大きい保存版は基準日時以降にだけあります（" + o.larger_capture_date + "）");
+    }
+    return box;
   }
 
   /* 保存日と、担当者向けには保存履歴の比較結果。新しい列の無い旧 CSV では保存日だけを出す */
   function captureCell(o) {
     var box = document.createElement("div");
     box.appendChild(document.createTextNode(o.capture_date || ""));
-    if (PUBLIC || !INTEGRITY_LABELS[o.integrity_status]) return box;
-    var wrap = document.createElement("div");
-    var label = document.createElement("span");
-    label.className = "label int-" + o.integrity_status;
-    label.textContent = INTEGRITY_LABELS[o.integrity_status];
-    wrap.appendChild(label);
-    box.appendChild(wrap);
-    function note(text) {
-      var n = document.createElement("span");
-      n.className = "note";
-      n.textContent = text;
-      box.appendChild(n);
+    if (PUBLIC) return box;
+    if (INTEGRITY_LABELS[o.integrity_status]) {
+      var wrap = document.createElement("div");
+      var label = document.createElement("span");
+      label.className = "label int-" + o.integrity_status;
+      label.textContent = INTEGRITY_LABELS[o.integrity_status];
+      wrap.appendChild(label);
+      box.appendChild(wrap);
+      if (o.later_digest_date) {
+        note(box, "この保存版より後に、digest の違う保存あり（" + o.later_digest_date + "）");
+      }
+      if (o.digest_first_seen && o.digest_first_seen !== o.capture_date) {
+        note(box, "同じ digest の最初の保存: " + o.digest_first_seen);
+      }
     }
-    if (o.later_digest_date) {
-      note("この保存版より後に、digest の違う保存あり（" + o.later_digest_date + "）");
-    }
-    if (o.digest_first_seen && o.digest_first_seen !== o.capture_date) {
-      note("同じ digest の最初の保存: " + o.digest_first_seen);
-    }
+    if (showTruncation(o)) box.appendChild(truncationBox(o));
     return box;
+  }
+
+  function note(box, text) {
+    var n = document.createElement("span");
+    n.className = "note";
+    n.textContent = text;
+    box.appendChild(n);
   }
 
   function licenseCell(o) {

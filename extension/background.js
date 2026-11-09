@@ -8,6 +8,8 @@ const INTERVAL_MS = 1000; // Wayback のレート制限は未公表。App 1 と�
 const TIMEOUT_MS = 180000; // CDX は 1 回 20〜60 秒かかる
 const RETRIES = 3;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+// v2: files の結果に possiblyTruncated と alt を加えた（Issue #7）
+const CACHE_VERSION = "v2";
 const RETRY_STATUS = new Set([429, 502, 503, 504]);
 
 let nextSlot = 0;
@@ -64,7 +66,8 @@ async function fetchText(url) {
 
 /** kind（files / landing）ごとに CDX を照会して要約を返す。成功した結果だけキャッシュする。 */
 async function lookup(kind, host, id) {
-  const key = kind + ":" + host + "/" + id;
+  // 結果の形を変えたら CACHE_VERSION を上げる（古い形の結果を使わない。古いキーは TTL 後に掃除される）
+  const key = CACHE_VERSION + ":" + kind + ":" + host + "/" + id;
   const stored = await chrome.storage.local.get(key);
   const hit = stored[key];
   if (hit && Date.now() - hit.savedAt < CACHE_TTL_MS) return hit.result;

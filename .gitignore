@@ -11,3 +11,4 @@ result_before_*.csv
 
 # 設定ファイル（連絡先のメールアドレスを含むことがある）
 .env
+.claude/settings.json

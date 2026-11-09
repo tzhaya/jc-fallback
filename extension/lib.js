@@ -147,33 +147,78 @@
   }
 
   /**
+   * CDX の digest を比較できる形にする（wb_fulltext_csv.py の normalize_digest と同じ規則）。
+   * 前後の空白と先頭の sha1:（大文字小文字を問わない）を除いて英大文字にし、32 文字の Base32 だけを返す。
+   * 比較できない値（欠損）は空文字。
+   */
+  function normalizeDigest(v) {
+    let s = String(v === undefined || v === null ? "" : v).trim();
+    if (s.slice(0, 5).toLowerCase() === "sha1:") s = s.slice(5).trim();
+    s = s.toUpperCase();
+    return /^[A-Z2-7]{32}$/.test(s) ? s : "";
+  }
+
+  /** CDX の length を整数で返す。空や数値でない値は null。 */
+  function lengthInt(r) {
+    const s = String(r.length === undefined || r.length === null ? "" : r.length).trim();
+    return /^[+-]?\d+$/.test(s) ? Number(s) : null;
+  }
+
+  /**
+   * 採用版が、digest の違うほかの保存版より小さいか（途中で切れている可能性。Issue #7）。
+   * 比較対象は、digest が欠損しておらず採用版と違い、length が採用版より大きい capture。
+   * CDX の length は圧縮後の長さなので推定にすぎない。代替版は比較対象のうち length が最大のもの
+   * （同じなら新しいもの）。App 1 と違い基準日時は無いので、全期間から選ぶ。
+   * 返り値は {possiblyTruncated, alt: {timestamp, original} | null}。
+   */
+  function truncationCheck(caps, adopted) {
+    const none = { possiblyTruncated: false, alt: null };
+    const ad = normalizeDigest(adopted.digest);
+    const adLen = lengthInt(adopted);
+    if (!ad || adLen === null) return none;
+    let best = null;
+    for (const c of caps) {
+      const d = normalizeDigest(c.digest);
+      const n = lengthInt(c);
+      if (!d || d === ad || n === null || n <= adLen) continue;
+      if (!best || n > best.n || (n === best.n && c.timestamp > best.timestamp)) {
+        best = { n, timestamp: c.timestamp, original: c.original };
+      }
+    }
+    return best ? { possiblyTruncated: true, alt: { timestamp: best.timestamp, original: best.original } } : none;
+  }
+
+  /**
    * /record/{id}/files/ 配下の capture から、PDF ごとの最新の有効な capture を選ぶ。
-   * 返り値は { 復号したファイル名: {status: "ok", timestamp, original, n} | {status: "invalid"} }。
-   * invalid は capture はあるが有効なもの（status 200 かつ length が正）が無い場合。
+   * 返り値は { 復号したファイル名: {status: "ok", timestamp, original, n, possiblyTruncated, alt}
+   * | {status: "invalid"} }。invalid は capture はあるが有効なもの（status 200 かつ length が正）が
+   * 無い場合。possiblyTruncated と alt は truncationCheck の結果。
    */
   function latestFileCaptures(rows, host, id) {
     const prefix = "/record/" + id + "/files/";
-    const out = {};
+    const groups = {};
     for (const r of rows || []) {
       const p = urlParts(r.original);
       if (!p || p.host !== host || p.path.indexOf(prefix) !== 0) continue;
       const name = safeDecode(p.path.slice(prefix.length));
       if (!isPdfName(name)) continue;
-      const valid = String(r.statuscode) === "200" && hasValidLength(r);
-      const cur = out[name];
-      if (!valid) {
-        if (!cur) out[name] = { status: "invalid" };
+      const caps = groups[name] || (groups[name] = []);
+      if (String(r.statuscode) === "200" && hasValidLength(r)) caps.push(r);
+    }
+    const out = {};
+    for (const name of Object.keys(groups)) {
+      const caps = groups[name];
+      if (!caps.length) {
+        out[name] = { status: "invalid" };
         continue;
       }
-      if (!cur || cur.status !== "ok") {
-        out[name] = { status: "ok", timestamp: r.timestamp, original: r.original, n: 1 };
-      } else {
-        cur.n += 1;
-        if (r.timestamp > cur.timestamp) {
-          cur.timestamp = r.timestamp;
-          cur.original = r.original;
-        }
-      }
+      let adopted = caps[0];
+      for (const c of caps) if (c.timestamp > adopted.timestamp) adopted = c;
+      const t = truncationCheck(caps, adopted);
+      out[name] = {
+        status: "ok", timestamp: adopted.timestamp, original: adopted.original, n: caps.length,
+        possiblyTruncated: t.possiblyTruncated, alt: t.alt,
+      };
     }
     return out;
   }
@@ -202,7 +247,7 @@
       ["url", target],
       ["matchType", "prefix"],
       ["filter", "statuscode:200"],
-      ["fl", "timestamp,original,statuscode,length"],
+      ["fl", "timestamp,original,statuscode,length,digest"],
       ["output", "json"],
     ]);
     return CDX_ENDPOINT + "?" + params.toString();
@@ -255,6 +300,8 @@
     ccFromRights,
     parseCdxJson,
     hasValidLength,
+    normalizeDigest,
+    truncationCheck,
     latestFileCaptures,
     latestLandingCapture,
     cdxQueryUrl,

@@ -302,11 +302,15 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
           <tr><td><code>license_status</code></td><td><code>--no-license</code> / <code>--no-bulk</code> のときは空。<code>cc</code>（CC ライセンス。NC や ND の条件が付くものも含む）/ <code>check</code>（要確認。権利情報とファイルのライセンス種別が食い違う）/ <code>not_cc</code>（権利情報はあるが CC ではない）/ <code>no_rights</code>（権利情報なし）/ <code>no_json</code>（メタデータを取得できない）</td></tr>
           <tr><td class="wrap-first"><code>license</code>, <code>rights</code>, <code>rights_uri</code>, <code>licensetype</code></td><td>判定した CC ライセンスの名前（例: <code>CC BY 4.0</code>）、権利情報の本文と URI、ファイルのライセンス種別（WEKO3 の値）</td></tr>
           <tr><td class="wrap-first"><code>license_capture_date</code>, <code>license_source_url</code></td><td>判定に使ったメタデータの保存日と、Wayback Machine 上の URL</td></tr>
-          <tr><td><code>capture_digest</code></td><td>採用した保存の digest（Wayback Machine が保存したバイト列の SHA-1。欠けていれば空）</td></tr>
+          <tr><td><code>capture_digest</code></td><td>採用した保存版の digest 値（Wayback Machine が保存したバイト列の SHA-1。欠けていれば空）</td></tr>
           <tr><td><code>digest_variants</code></td><td>そのファイルの保存のうち、比べられる digest の種類の数</td></tr>
-          <tr><td><code>integrity_status</code></td><td>保存どうしの digest の比較結果。<code>consistent</code>（2回以上の保存がすべて同じ）/ <code>changed</code>（バイト列の違う保存がある。内容の変更とは限らない）/ <code>single</code>（比べられる保存が1件だけ）/ <code>unknown</code>（digest の欠けた保存があり、判定できない。<code>cdx_error</code> の行も <code>unknown</code>）</td></tr>
-          <tr><td><code>digest_first_seen</code></td><td>採用した保存と同じ digest を最初に観測した日（この内容になった日とは限りません）</td></tr>
-          <tr><td><code>later_digest_date</code></td><td>採用した保存より後に、別の digest を最初に観測した日（変更が起きた日とは限りません）</td></tr>
+          <tr><td><code>integrity_status</code></td><td>保存版どうしの digest 値の比較結果。<code>consistent</code>（2回以上の保存がすべて同じ）/ <code>changed</code>（バイト列の違う保存がある。内容の変更とは限らない）/ <code>single</code>（比べられる保存版が1件だけ）/ <code>unknown</code>（digest 値の欠けた保存版があり、判定できない。<code>cdx_error</code> の行も <code>unknown</code>）</td></tr>
+          <tr><td><code>digest_first_seen</code></td><td>採用した保存版と同じ digest 値を最初に観測した日（この内容になった日とは限りません）</td></tr>
+          <tr><td><code>later_digest_date</code></td><td>採用した保存版より後に、別の digest 値を最初に観測した日（変更が起きた日とは限りません）</td></tr>
+          <tr><td><code>possibly_truncated</code></td><td>採用した保存版より <code>length</code> が大きく、digest 値の違う保存があれば <code>1</code>（採用した保存が途中で切れている可能性がある）。比べる相手は全期間の保存です。空は「この条件に当たらない」という意味で、切れていないことを確かめたものではありません</td></tr>
+          <tr><td><code>larger_capture_date</code></td><td><code>possibly_truncated</code> が <code>1</code> のとき、条件を満たす保存版（採用した保存より <code>length</code> が大きく、digest の違うもの）のうち、<code>length</code> がいちばん大きいものの保存日（<code>--capture-before</code> の日時より後の保存版も含む）</td></tr>
+          <tr><td><code>alt_capture_date</code></td><td>別の保存版の保存日。条件を満たす保存版のうち、<code>--capture-before</code> の日時より前で <code>length</code> がいちばん大きいもの（同じ長さなら新しいもの）。無ければ空</td></tr>
+          <tr><td><code>alt_archive_url</code></td><td>別の保存版の原本の URL（<code>id_</code> 指定）。無ければ空</td></tr>
         </tbody>
       </table>
     </div>
@@ -314,11 +318,14 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
       <li>複数のファイルのうち一部だけが保存されている場合も、<code>ok</code> になります。ファイルの不足は検出できません。</li>
       <li><code>capture_date</code> は、Wayback が最後に保存した日です。その後にリポジトリ側でファイルが差し替えられていても、反映されていません。</li>
       <li>digest は、Wayback Machine が保存したバイト列の SHA-1 です（<code>id_</code> で取得した本文の SHA-1 と一致することを確かめています）。比較は、取得できた保存どうしで行います。</li>
-      <li><code>consistent</code> は「取得できた比較可能な保存が、すべて同じバイト列だった」という意味です。内容が正しいこと（真正性）は保証しません。たとえば、最初の保存より前に改ざんされていれば、改ざん後の内容どうしで一致します。</li>
-      <li><code>changed</code> は「バイト列の違う保存がある」という意味で、内容が変わったとは限りません。内容の変更（正規の差し替えか改ざんかは区別できません）のほかに、保存が途中で切れている場合（1 MiB や 5 MiB ちょうどで切れた例があります）や、圧縮（gzip）されたまま保存されている場合も <code>changed</code> になります。</li>
+      <li><code>consistent</code> は「取得できた比較可能な保存が、すべて同じバイト列だった」という意味です。内容が正しいこと（真正性）は保証しません。たとえば、最初の保存より前に変更や差し替えがされていれば、変更後の内容どうしで一致します。</li>
+      <li><code>changed</code> は「バイト列の違う保存版がある」という意味で、内容が変わったとは限りません。内容の変更（正規の差し替えか改ざんかは区別できません）のほかに、保存版が途中で切れている場合（1 MiB や 5 MiB ちょうどで切れた例があります）や、圧縮（gzip）されたまま保存されている場合も <code>changed</code> になります。</li>
       <li><code>changed</code> でも、PDF へのリンク（<code>archive_url</code>）は出します。PDF を開いて内容を確かめ、利用するかどうかを判断してください。</li>
-      <li><code>single</code> は「比べられる保存が1件だけ」という意味です。Wayback に1回しか保存されていないとは限りません（status 200 以外の記録は数えていません）。</li>
-      <li><code>--capture-before</code> は、改ざんの前の保存を選びやすくする手段です。指定した日時より前の保存が改ざんされていないことは保証しません。日時は UTC で、指定した日時ちょうどの保存は含みません。</li>
+      <li>Wayback Machine は、大きなファイルを途中までしか保存しないことがあります（1 MiB や 5 MiB ちょうどで切れた例があり、どれも PDF として開けませんでした）。採用した保存より <code>length</code> が大きく、digest の違う保存があれば、<code>possibly_truncated</code> を <code>1</code> にし、別の保存版（<code>alt_archive_url</code>）を示します。採用する保存は変えません。</li>
+      <li><code>possibly_truncated</code> は、CDX の <code>length</code>（圧縮後の長さ）からの推定です。正規の差し替えでファイルが小さくなった場合にも <code>1</code> になります。圧縮（gzip）されたまま保存された版があるときも、その版の <code>length</code> がわずかに大きく出て、<code>1</code> になることがあります。jircas で確かめた、<code>length</code> の差が 2% 未満の 2 件は、どちらも別の版が gzip のまま保存された同じ内容でした（そのうち 1 件を Chrome でダウンロードすると展開され、採用した保存版と同じ PDF になりました）。保存版が1件だけのものや、すべての保存版が同じように切れているものは検出できません。</li>
+      <li>別の保存版は、比較した保存版のうち <code>length</code> がいちばん大きいものです。完全な版であることは保証しません。<code>--capture-before</code> を指定したときは、その日時より前の保存版からだけ選びます。指定の日時より後にしか <code>length</code> が大きい保存版が無いときは、<code>alt_archive_url</code> は空で、<code>larger_capture_date</code> だけが入ります。</li>
+      <li><code>single</code> は「比べられる保存版が1件だけ」という意味です。Wayback に1回しか保存されていないとは限りません（status 200 以外の記録は数えていません）。</li>
+      <li><code>--capture-before</code> は、改ざんの前の保存版を選びやすくする手段です。指定した日時より前の保存が改ざんされていないことは保証しません。日時は UTC で、指定した日時ちょうどの保存は含みません。</li>
       <li><code>--capture-before</code> を指定すると、指定した日時より前のメタデータが無いアイテムは、ライセンスが <code>no_json</code> になります。実行ログに、<code>no_json</code> の理由ごとの件数を出します。</li>
     </ul>
   </section>
@@ -327,8 +334,8 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
     <h2>閲覧ページの設置</h2>
     <p>閲覧ページは、CSV を表示し、テキストボックスへの入力で絞り込む単体のページです。外部のライブラリは使いません。用途に応じて、次の2種類を使い分けます。ページのタイトルと説明文は、設置する機関に合わせて書き換えてください。</p>
     <ul>
-      <li><code>viewer_staff.html</code>（担当者向け）：すべての PDF へのリンクと、ライセンスの判定結果を表示します。「CC ライセンスのものだけを表示する」で絞り込めます。</li>
-      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では、CC ライセンスのものだけを表示します。冒頭にあるサンプルの説明は書き換えてください。</li>
+      <li><code>viewer_staff.html</code>（担当者向け）：すべての PDF へのリンクと、ライセンスの判定結果を表示します。「CC ライセンスのものだけを表示する」で絞り込めます。保存日の下に、digest の比較結果と、途中で切れている可能性の注意と、別の保存版へのリンクを表示します。</li>
+      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では、CC ライセンスのものだけを表示します。途中で切れている可能性がある PDF には、リンクの下に注意と別の保存版へのリンクを表示します。冒頭にあるサンプルの説明は書き換えてください。</li>
     </ul>
     <p>一般公開向けのページには、ライセンス情報を含む CSV（<code>--no-license</code> も <code>--no-bulk</code> も付けずに出力したもの）を使います。ライセンスの列が無いか空の CSV では、PDF へのリンクを1件も表示しません。</p>
     <ol>
@@ -350,6 +357,7 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
       <li>本文 PDF の保存版へのリンクは、IRDB の「権利情報」に CC ライセンス（NC や ND の条件が付くものを含む）が書かれている資料にだけ表示します。ただし、公開日（Available）より前のファイルと、アクセスが制限されているファイルには表示しません。</li>
       <li>リンクを表示する前に、Wayback Machine に保存状況を問い合わせます。保存を確認できたものだけをリンクにし、保存日を添えます。確認が終わるまでは項目名をリンクにせず、点の連続で通信中であることを示します。</li>
       <li>問い合わせには、1件あたり数十秒かかることがあります。問い合わせに失敗したときは、最新の保存版へのリンクを表示します（開けない場合があります）。</li>
+      <li>最新の保存より <code>length</code> が大きく、digest の違う保存があるときは、保存版が途中で切れている可能性があるとして、本文 PDF のリンクの下に注意と、別の保存版（いちばん大きいもの）へのリンクを表示します。判定は CSV 出力ツールの <code>possibly_truncated</code> と同じです。</li>
       <li>問い合わせの結果は、6時間ブラウザに保存します。</li>
     </ul>
 

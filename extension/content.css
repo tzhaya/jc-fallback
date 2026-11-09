@@ -49,3 +49,9 @@
   min-width: 3.5em;
   margin-left: 2px;
 }
+
+/* 途中で切れている可能性（Issue #7）。注意と、別の保存版へのリンク。 */
+#wbfb-panel .wbfb-trunc { display: block; font-size: 14px; }
+#wbfb-panel .wbfb-trunc:empty { display: none; }
+#wbfb-panel .wbfb-trunc > span { display: block; }
+#wbfb-panel .wbfb-warning { color: #c74700; font-weight: 700; }
