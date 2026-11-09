@@ -8,3 +8,6 @@ __pycache__/
 # 動作確認・修正前後の比較用の出力
 smoke.csv
 result_before_*.csv
+
+# 設定ファイル（連絡先のメールアドレスを含むことがある）
+.env
