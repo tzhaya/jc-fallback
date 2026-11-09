@@ -8,6 +8,8 @@
 
 ## 作る2つのアプリ
 1. **App 1（実装済み・2026-11-07 に全件で実通信を検証済み）**: IRDB から自機関アイテムを列挙し、本文 URL を元に Wayback の最新アーカイブ URL を取得して CSV 出力。担当者が手元で参照・ダウンロードする。登録件数が少ない機関向け。取得は、レコードごとの照会（既定）と `--bulk`（`/record/` 配下を一括で分割取得）の2通り。`--license`（2026-11-08 実装）で export JSON からライセンスを判定して列に出す。**`--bulk` と `--license` は既定で有効**（`BooleanOptionalAction`。`--no-bulk` / `--no-license` で無効）。`--no-license` と `--no-bulk` のときはライセンスの 7 列を空にする（`--no-bulk` では export JSON の保存先が分からないため、警告して取得しない）。
+   - **保存履歴の digest（Issue #5、2026-11-09 実装）**: CDX の `digest` を同じ本文 URL（`file_key`）の capture どうしで比べ、`integrity_status` を出す。計画は Issue #5 の r2 とその補遺 r2.1。判定は全期間の有効な capture で、優先順は `changed`（比較可能な digest が 2 種類以上）> `unknown`（欠損あり）> `consistent`（2 回以上で 1 種類）> `single`（1 回）。`changed` は「保存されたバイト列の差異」であり、内容の変更とは限らない（途中で切れた保存、gzip のまま保存されたものでも起きる。下記の実測）。表示は「差異あり」。**`changed` でも PDF へのリンクは出す**（最終の判断は人間が行う。利用者の方針、2026-11-09）。digest は `normalize_digest`（空白除去、`sha1:` を大小無視で除去、英大文字化、`[A-Z2-7]{32}` 以外は欠損）。採用版の digest が欠損なら `digest_first_seen` と `later_digest_date` は空。
+   - **`--capture-before`**: UTC で `timestamp < 指定値`（未満。日付だけなら 00:00:00 UTC = 日本時間 09:00）の capture から採用する。CDX は全期間を取得して手元で絞る（`to=` は使わない。上限より後の変化を見るため）。上限より後にしか無いファイルは `after_cutoff`（`file_url` と全期間の集計だけを埋め、採用版に依存する列は空。`item_files_captured` は採用できた PDF の数）。export JSON の候補も上限で絞り、上限を満たさないライセンスのキャッシュは、取り直しに失敗しても返さない（`license_cache_usable`。計画レビュー P1）。`parse_capture_before("")` は `""`（制限なし）を返し、`None`（未指定）と区別する（CLI の空文字で `.env` を打ち消せるように）。no_json の理由は `license_missing_reasons` で 4 つに分けて実行ログに出す。
 2. **App 2（2026-11-08 実装、`extension/`）**: Chrome / Edge 向けの拡張機能（MV3。まずは「パッケージ化されていない拡張機能を読み込む」で配る）。**IRDB の詳細ページだけ**が対象（CiNii Research は対象外）。対象リポジトリは JAIRO Cloud 全体で、`*.repo.nii.ac.jp` と、独自ドメインで運用しているものの一覧（`lib.js` の `CUSTOM_HOSTS`、18 ホスト。利用者から提供、2026-11-08）。一覧外のホストは、WEKO3 と同じ URL の形でも対象外（JAIRO Cloud 以外は何も表示しない方針のため）。独自ドメインのうち naro、tottori-u、u-tokyo の 3 つは、IRDB の URL が `/records/{id}` と `/record/{id}/files/…` であることを確認済み。残り 15 は未確認。登録件数が多い機関向け。
    - **一般向け**: 本文 PDF へのリンクは、IRDB の「権利情報」が CC（NC/ND 付きも CC）の資料にだけ出す。CC の種類が食い違うときは出さない。ランディングページ（`/records/{id}`）の保存版へのリンクはすべての資料に出す。
    - 公開日（ファイルの `Available`）が未来のファイル、アクセス権が restricted / metadata only のもの、embargoed で公開日が無いものには、CC でもリンクを出さない（2001115 は CC だが Available 2027-05-13 のエンバーゴ）。
@@ -17,10 +19,16 @@
 - `wb_fulltext_csv.py`: App 1 本体（標準ライブラリのみ）。使い方は先頭の docstring。
 - オプションは `.env`（カレントディレクトリ、`--env-file` で変更。`utf-8-sig`）にも書ける（Issue #3、2026-11-09）。キーは `WB_` + オプション名（`ENV_OPTIONS`。`--limit`/`--refresh` は対象外、`WB_CONTACT` を含む）。優先順はコマンドライン > 環境変数 > `.env` > 既定値。argparse の既定値は `None` にし、`resolve_options` が**採用した値だけ**を型変換する（下位の不正値を CLI で上書きできるように）。`.env` は引数の解析後に読む（壊れていても `--help` が出るように）。未知の `WB_*` キーは警告。テストは手元の `.env` を読まないよう `--env-file` と dict の環境変数を渡す。
 - README.md と `docs/index.html` は使い方（オプション表など）を二重に書いている。片方を直したらもう片方にも反映する。
-- 取得対象は実行時に `--host`（または `.env` の `WB_HOST`。どちらか必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホスト）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
-- `viewer_staff.html`（担当者向け。全 PDF へのリンク、ライセンス列、「CC のみ」絞り込み）と `docs/sample/viewer_public.html`（一般公開向け。CC と判定した PDF にだけ Wayback へのリンクを出す。初期状態は CC のみ表示）。両者は `PUBLIC` 定数と見出し・注記だけが違う。片方を直したらもう片方にも反映する。旧名は `viewer.html` と `docs/sample/view.html`（2026-11-08 に改名）。
+- 取得対象は実行時に `--host`（または `.env` の `WB_HOST`。どちらか必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホストと照会条件 `CDX_QUERY`〈`fl` と `filter`〉）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す。CDX のキャッシュは `drop_stale_cache_lines` が照会条件の違う行をファイルから消し、1 回だけ警告する）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
+- ビューアは 3 つある。
+  - `viewer_staff.html`: 担当者向け。全 PDF へのリンク、ライセンス列、「CC のみ」絞り込みがある。
+  - `docs/sample/viewer_public.html`: 一般公開向け。CC と判定した PDF にだけ Wayback へのリンクを出す。初期状態は CC のみ表示。
+  - `docs/sample/viewer_public_naro.html`: `viewer_public.html` の農研機構版。`result_naro.csv` を読む。
+  - 3 つのコードは同じで、違うのは `PUBLIC` 定数（担当者向けだけ `false`）、`CSV_URL`（naro 版だけ `result_naro.csv`）、見出しと説明文だけ。1 つを直したら、残りの 2 つにも反映する。
+  - 旧名は `viewer.html` と `docs/sample/view.html`（2026-11-08 に改名）。
 - ライセンスの判定（`license_for_file`）: 権利情報の URI か本文の CC URL、またはファイルの `licensetype`（license_0〜12）を CC とし、**NC/ND 付きも CC と同じ扱い**（利用者の判断）。CC の種類が食い違う、または `license_no` なのに権利情報が CC のものは `check`（要確認）。export JSON の取得結果は `export_json.jsonl` にキャッシュし、CDX に新しい capture が現れたら取り直す。最新の capture が通信エラーで取れず古い capture で判定したときは、`latest` に使った capture の timestamp を入れ、次回の実行で最新を取り直す（PR #1 の Codex レビューで指摘）。
 - `extension/`: App 2。`lib.js`（DOM に依存しない判定ロジック。content script・Service Worker・Node テストで共有）、`content.js`（IRDB の表を th の見出し〈ファイル/File、権利情報/Rights、資源識別子/Identifier、アクセス権/Accessrights〉で読み、パネルを表の直前に挿入）、`background.js`（CDX 照会とキャッシュ）、`content.css`、`manifest.json`。テストは `node --test extension/test/*.test.js`（Node 標準のみ。DOM 部分は対象外で、IRDB の実ページ 9 件にスクリプトを注入して確認した）。
+- `test_fixtures/`: ビューアの手動確認用 CSV（`viewer_integrity.csv` は保存履歴の判定と `after_cutoff` を含む、`viewer_legacy.csv` は新しい 5 列の無い旧形式）。Python のテストからは使わない。内容は同フォルダの README.md。
 - `test_wb_fulltext_csv.py`: オフラインテスト。`python3 test_wb_fulltext_csv.py` で全 `test_*` を実行（pytest は使わない）。
 
 ## 確認済みの事実
@@ -70,6 +78,17 @@
   - Wayback で取れる PDF のファイル名は、すべて export JSON のファイル一覧に含まれていた。
 - 保存状況（`cdx_bulk.jsonl` から集計、statuscode 200）: export/json があるのは 906 中 689 レコード（うち 11 件は length が負の capture だけ）。ok の 743 件のうち 668 件。ID ≧ 2000900 では 227 中 63 件、ok 95 件のうち 48 件だけ。
 
+## 保存履歴の digest の実測（2026-11-09、jircas 906 レコード、Issue #5）
+- バルクを digest 付きで取り直すと 8,600 行（以前と同じ）。digest の欠損や正規化が必要な値（`sha1:` 付き、小文字）は 0 件。アイテム単位の結果（ok 743、no_capture 156、no_pdf 7）とライセンスの集計（CC 34、うち ok 33）は以前と同じ。
+- ファイル単位（ok 766）: consistent 445、changed 56（56 レコード。ID < 2000900 が 38、≧ 2000900 が 18。digest が 2 種類 53、3 種類 3）、single 265、unknown 0。
+- jircas の最新の PDF の capture は 2026-07-27。`--capture-before 2026-10-28` でも結果は変わらない（after_cutoff 0、`later_digest_date` のあるファイル 0）。export JSON も全件が上限より前。no_json 229 件の内訳は、有効な保存が無い 228、読めない 1。
+- **CDX の digest は、`id_` で取得した本文の SHA-1 の Base32 と一致する**。changed の 4 ファイルで、digest の違う capture 8 件を取得し、8 件すべて一致した（照合できなかったものは無い）。全件を照合したわけではない。
+- **changed の多くは、途中で切れた capture（truncated）が原因とみられる**。照合した 4 ファイルでは、違う digest の capture の本文が、ちょうど 1,048,576 B（1 MiB）か 5,242,880 B（5 MiB）だった（先頭は `%PDF-` だが、全体より短い）。内容が差し替えられたのではなく、クローラのサイズ上限で切れたものと見られる。
+- **採用した最新の capture が途中で切れている例がある**: 2000419 と 2000404 の `archive_url` は、どちらも 5,242,880 B で、末尾に `%%EOF` が無かった（HTTP 200）。CDX の length（圧縮後のレコード長）からは見分けられない。既存の「最新を採用」の方針のままでは、壊れた PDF へのリンクを出すことがある。対応（例: changed のとき、切れていない capture を選ぶ）は未決。
+  - Chrome の PDF ビューアで開くと、途中で切れた 3 件（2000404 の 1 MiB と 5 MiB、2000419 の 5 MiB）はどれも「PDF ドキュメントを読み込めませんでした」になり、1 ページも表示されなかった（Linearized の PDF でも同じ）。切れていない版は、2000404 が 120 ページ、2000419 が 92 ページ表示された。
+- **digest が違っても内容が同じことがある（gzip）**: 2000419 の 2025-06-18 の capture は、Wayback が `Content-Encoding: gzip` 付きで返し、本文は gzip のままだった（digest はこの gzip のバイト列の SHA-1）。展開すると、2025-10-14 の capture とバイト単位で同じだった。したがって `changed` には、途中で切れたものと gzip のものという、内容の変更ではない例が含まれる。ブラウザはこのヘッダを見て展開するので、ブラウザでダウンロードすれば PDF として読めるはずだが、確かめていない（ヘッダを無視するツールで取ると gzip のまま保存される）。
+- **`warc/revisit` の行がある**: `filter=statuscode:200` を外したバルクの 1 ページ目（5,000 行）では、`/record/{id}/files/` の 2,002 行のうち 156 行が revisit（statuscode `-`）だった（ほかは 200 が 1,682、503 が 139、302 が 16、404 が 7、301 が 2）。現在は 200 だけを数えるので、`single` と `n_captures` は少なめに出る。対象に含めるかは未決。
+
 ## App 2 のための確認（2026-11-08）
 - `…/web/20991231id_/{URL}` は最新の capture へ 302 で転送され、`id_` も保たれる（2000885 で確認）。保存が無い URL は 404。ただし status や length を見ずに最新を選ぶので、length が負の capture に飛ぶ可能性がある。→ CDX で確認できたら timestamp 指定のリンクに置き換える。
 - **CDX API は `Access-Control-Allow-Origin` を返さない**（ページの JS からは読めない）。Availability API（`archive.org/wayback/available`）は `*` を返すが length が無い。→ 拡張機能の Service Worker と `host_permissions` で CDX を引く。
@@ -93,13 +112,14 @@
 5. CiNii Research API の `appid` なし利用がいつまで通るか。
 
 ## CSV の列
-`status, title, issn, publicationName, volume, number, startingPage, endingPage, publicationDate, updated, irdb_url, record_url, record_id, file_url, capture_timestamp, capture_date, mimetype, length, n_captures, item_files_captured, archive_url, license_status, license, rights, rights_uri, licensetype, license_capture_date, license_source_url`（ライセンスの 7 列は `--no-license` / `--no-bulk` のときは空）。
-`prism:*` は列名から `prism:` を除いた名前。同名要素が複数ある場合（言語違い）は lang を出さず、内容を ` | ` で連結する。`n_captures` はファイル単位の capture 数、`item_files_captured` はアイテム単位の保存確認 PDF 数（`cdx_error` の行は空欄）。以前の `pub_date` は `publicationDate` に置き換えた。
+`status, title, issn, publicationName, volume, number, startingPage, endingPage, publicationDate, updated, irdb_url, record_url, record_id, file_url, capture_timestamp, capture_date, mimetype, length, n_captures, item_files_captured, archive_url, license_status, license, rights, rights_uri, licensetype, license_capture_date, license_source_url, capture_digest, digest_variants, integrity_status, digest_first_seen, later_digest_date`（ライセンスの 7 列は `--no-license` / `--no-bulk` のときは空。保存履歴の 5 列は Issue #5 で末尾に追加し、既存の列の位置は変えていない）。
+`prism:*` は列名から `prism:` を除いた名前。同名要素が複数ある場合（言語違い）は lang を出さず、内容を ` | ` で連結する。`n_captures` はファイル単位の capture 数（`--capture-before` の上限より後も含む全期間）、`item_files_captured` はアイテム単位の、上限内で採用できた PDF 数（`cdx_error` の行は空欄）。`status` に `after_cutoff` がある（`--capture-before` 指定時のみ）。以前の `pub_date` は `publicationDate` に置き換えた。
 
 ## 次の作業
 1. 公開済みの GitHub Pages の URL が `sample/view.html` から `sample/viewer_public.html` に変わった。旧 URL を残すか（転送用ページ）は未決。
 2. 実装の改善（任意）: ダウンロードした PDF の先頭 `%PDF-` 検証、`robots` や CDX の応答エラーの扱い、no_capture の細分化。
-3. App 2: 実際に拡張機能として読み込んだ状態での動作確認（Service Worker の CDX 照会とキャッシュ、長い照会中に Service Worker が止まらないか）。必要なら Chrome Web Store での公開を検討する。
+3. Issue #5 の続き（要判断）: 途中で切れた capture を採用しない方法（上記の実測を参照）と、`warc/revisit` の行を比較の対象に含めるか。含めるなら `CDX_FILTER` が変わり、キャッシュは取り直しになる。
+4. App 2: 実際に拡張機能として読み込んだ状態での動作確認（Service Worker の CDX 照会とキャッシュ、長い照会中に Service Worker が止まらないか）。必要なら Chrome Web Store での公開を検討する。
 
 ## 開発上の約束
 - 依存は標準ライブラリのみ。テストは固定 fixture でネットワークに依存させない。
