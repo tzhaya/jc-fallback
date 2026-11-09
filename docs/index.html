@@ -262,18 +262,20 @@ footer p { margin: 0 0 4px; }
     <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
     <p><code>WB_CONTACT</code> は User-Agent に付ける連絡先で、環境変数か <code>.env</code> で渡します。Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。CDX の応答には、1回あたり 20〜60 秒かかることがあります。</p>
     <h3>設定ファイル（<code>.env</code>）</h3>
-    <p><code>--limit</code> と <code>--refresh</code> 以外のオプションと <code>WB_CONTACT</code> は、カレントディレクトリの <code>.env</code> に書いておけます。<code>.env.example</code> を <code>.env</code> という名前でコピーし、値を書き換えてください。<code>.env</code> があれば、<code>python wb_fulltext_csv.py</code> だけで実行できます。</p>
+    <p>オプションは、カレントディレクトリの <code>.env</code> に書いておけます。<code>.env.example</code> を <code>.env</code> という名前でコピーし、値を書き換えてください。<code>.env</code> に <code>WB_HOST</code> を書いておけば、<code>python wb_fulltext_csv.py</code> だけで実行できます。</p>
     <pre tabindex="0"><code>WB_HOST=jircas.repo.nii.ac.jp
 WB_CONTACT=連絡先メールアドレス
 WB_OUT=result.csv
 WB_LICENSE=false</code></pre>
     <ul>
-      <li>キーは <code>WB_</code> にオプション名を大文字で続け、<code>-</code> を <code>_</code> にしたものです（<code>--cache-dir</code> は <code>WB_CACHE_DIR</code>）。</li>
-      <li><code>--bulk</code> と <code>--license</code> は <code>true</code> / <code>false</code> で指定します（<code>1</code> / <code>0</code>、<code>yes</code> / <code>no</code>、<code>on</code> / <code>off</code> も使えます）。</li>
-      <li>1 行に 1 項目を書きます。<code>#</code> で始まる行はコメントです。値は <code>"</code> か <code>'</code> で囲んでもかまいません。行末のコメントは書けません。</li>
-      <li>文字コードは UTF-8 です（BOM 付きでもかまいません）。</li>
-      <li>同じ項目を複数の場所で指定したときは、コマンドライン、環境変数、<code>.env</code>、既定値の順に優先します。</li>
-      <li><code>.env</code> は <code>.gitignore</code> で Git の管理から外しています。</li>
+      <li>キーは、オプション名を大文字にして <code>-</code> を <code>_</code> に置き換え、先頭に <code>WB_</code> を付けたものです（<code>--cache-dir</code> は <code>WB_CACHE_DIR</code>）。連絡先の <code>WB_CONTACT</code> も書けます。</li>
+      <li><code>--limit</code> と <code>--refresh</code> は書けません。どちらも1回の実行だけで使う指定で、<code>.env</code> に書くと毎回効いてしまうためです。</li>
+      <li><code>WB_BULK</code> と <code>WB_LICENSE</code> の値は、<code>true</code> か <code>false</code> です（<code>1</code> と <code>0</code>、<code>yes</code> と <code>no</code>、<code>on</code> と <code>off</code> も使えます）。</li>
+      <li>1行に1項目を書きます。<code>#</code> で始まる行はコメントです。行の途中からはコメントにできません。</li>
+      <li>値は <code>"</code> か <code>'</code> で囲んでもかまいません。</li>
+      <li>文字コードは UTF-8 です。BOM 付きでも読めます。</li>
+      <li>同じ項目をコマンドライン、環境変数、<code>.env</code> のうち複数で指定したときは、この順に優先します。どこにも指定しなければ、既定値を使います。</li>
+      <li><code>.env</code> には連絡先のメールアドレスを書くことがあるので、<code>.gitignore</code> で Git の管理から外しています。</li>
     </ul>
   </section>
 
