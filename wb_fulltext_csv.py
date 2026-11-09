@@ -26,6 +26,10 @@ Wayback Machine 上の最新アーカイブ URL を CSV に出力する（標準
 結果はキャッシュし、2 回目以降は新しい保存が現れたものだけ取り直す）。--no-license では
 ライセンスの列を空にする。--no-bulk のときもライセンス情報は取得しない。
 --host は対象リポジトリのホスト（必須）。--query（IRDB の q）の既定は --host と同じ。
+--limit と --refresh 以外のオプションと WB_CONTACT は、カレントディレクトリの .env に
+WB_HOST=jircas.repo.nii.ac.jp のように書いておける（キーは WB_ + オプション名を大文字にし、
+- を _ にしたもの。真偽は true/false。UTF-8、BOM 付きも可）。--env-file で別のファイルを指定できる。
+優先順はコマンドライン > 環境変数 > .env > 既定値。書き方は .env.example を参照。
 中断しても、同じ --cache-dir で再実行すれば取得済みの分は再利用される。
 キャッシュは検索条件（IRDB 一覧）とホスト（CDX）ごとに識別され、条件が違えば再利用しない。
 """
@@ -786,32 +790,154 @@ def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[s
     return {r: cache[r] for r in rids if r in cache and r in export_caps}, errors
 
 
+DEFAULT_ENV_FILE = ".env"
+
+
+def parse_dotenv(text: str) -> Dict[str, str]:
+    """.env の KEY=VALUE を読む。空行と # で始まる行は無視し、前後の空白と、値を囲む
+    引用符（" か '）を除く。行頭の export は許容する。エスケープ・変数展開・行末コメント・
+    複数行の値は扱わない（値に # を含められるようにするため）。BOM は呼び出し側で
+    utf-8-sig として読んで除く。"""
+    out: Dict[str, str] = {}
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("export ") or s.startswith("export\t"):
+            s = s[len("export"):].strip()
+        key, sep, value = s.partition("=")
+        key, value = key.strip(), value.strip()
+        if not sep or not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        out[key] = value
+    return out
+
+
+def parse_bool(s: str) -> bool:
+    v = s.strip().lower()
+    if v in ("true", "1", "yes", "on"):
+        return True
+    if v in ("false", "0", "no", "off"):
+        return False
+    raise ValueError(f"真偽値として解釈できません: {s!r}（true/false, 1/0, yes/no, on/off）")
+
+
+# .env（または環境変数）で指定できる項目: キー -> (args の属性名, 変換関数, コード上の既定値)。
+# --limit と --refresh は 1 回限りの指定なので対象外。WB_CONTACT はコマンドラインのオプションが無い。
+# 既定値はここにまとめる（build_parser の既定値は None にして、未指定を区別する）。
+ENV_OPTIONS: Dict[str, Tuple[str, object, object]] = {
+    "WB_HOST": ("host", str, None),
+    "WB_QUERY": ("query", str, None),  # None は「--host と同じ」（main で補う）
+    "WB_OUT": ("out", str, "wayback_fulltext.csv"),
+    "WB_CACHE_DIR": ("cache_dir", str, ".wb_cache"),
+    "WB_INTERVAL": ("interval", float, 1.0),
+    "WB_BULK": ("bulk", parse_bool, True),
+    "WB_BULK_PAGE_SIZE": ("bulk_page_size", int, BULK_PAGE_SIZE),
+    "WB_LICENSE": ("license", parse_bool, True),
+    "WB_CONTACT": ("contact", str, ""),
+}
+_ENV_KEY_BY_DEST = {dest: key for key, (dest, _, _) in ENV_OPTIONS.items()}
+
+
+def _env_help(dest: str, text: str, default_label: Optional[str] = None) -> str:
+    """help の文に、ENV_OPTIONS の既定値と .env のキーを付ける。"""
+    key = _ENV_KEY_BY_DEST[dest]
+    if default_label is None:
+        default = ENV_OPTIONS[key][2]
+        if isinstance(default, bool):
+            default_label = "有効" if default else "無効"
+        else:
+            default_label = str(default)
+    return f"{text}（既定: {default_label}。.env では {key}）"
+
+
+def resolve_options(args: argparse.Namespace, environ: Dict[str, str],
+                    dotenv: Dict[str, str]) -> List[str]:
+    """コマンドラインで指定されなかった（None の）項目を、環境変数・.env・コード上の既定値の
+    順に補う。型変換は採用した値にだけ行う（使わない下位の設定が不正でも止めない）。
+    変換に失敗したら、キーと出どころを含む ValueError を出す。戻り値は警告の一覧。"""
+    warnings = [f".env の {k} は未知のキーなので無視します" for k in dotenv
+                if k.startswith("WB_") and k not in ENV_OPTIONS]
+    for key, (dest, conv, default) in ENV_OPTIONS.items():
+        if getattr(args, dest, None) is not None:
+            continue  # コマンドラインの指定が最優先
+        for source, values in (("環境変数", environ), (".env", dotenv)):
+            if key in values:
+                raw = values[key]
+                try:
+                    value = conv(raw)
+                except ValueError as ex:
+                    raise ValueError(f"{source} の {key}={raw!r} が不正です（{ex}）") from None
+                break
+        else:
+            value = default
+        setattr(args, dest, value)
+    return warnings
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--host", required=True,
-                    help="対象リポジトリのホスト（例: jircas.repo.nii.ac.jp）。"
-                         "URI がこのホストのものだけを対象にする")
+    # ENV_OPTIONS にある項目の既定値は None（未指定）。値は resolve_options で補う
+    ap.add_argument("--host", default=None,
+                    help=_env_help("host", "対象リポジトリのホスト（例: jircas.repo.nii.ac.jp）。"
+                                   "URI がこのホストのものだけを対象にする。"
+                                   "この指定か .env の WB_HOST が必須", "なし"))
     ap.add_argument("--query", default=None,
-                    help="IRDB OpenSearch の q（既定: --host と同じ）")
-    ap.add_argument("--out", default="wayback_fulltext.csv")
-    ap.add_argument("--cache-dir", default=".wb_cache")
-    ap.add_argument("--interval", type=float, default=1.0, help="リクエスト間隔（秒）")
+                    help=_env_help("query", "IRDB OpenSearch の q", "--host と同じ"))
+    ap.add_argument("--out", default=None, help=_env_help("out", "出力する CSV"))
+    ap.add_argument("--cache-dir", default=None, help=_env_help("cache_dir", "キャッシュの保存先"))
+    ap.add_argument("--interval", type=float, default=None,
+                    help=_env_help("interval", "リクエスト間隔（秒）"))
     ap.add_argument("--limit", type=int, default=0, help="スモーク用: 先頭 N 件のみ")
     ap.add_argument("--refresh", action="store_true", help="IRDB の一覧を取り直す")
-    ap.add_argument("--bulk", action=argparse.BooleanOptionalAction, default=True,
-                    help="/record/ 配下を一括で分割取得して突き合わせる（既定）。"
-                         "--no-bulk でレコードごとに照会する")
-    ap.add_argument("--bulk-page-size", type=int, default=BULK_PAGE_SIZE,
-                    help=f"--bulk の 1 回あたり取得行数（既定 {BULK_PAGE_SIZE}）")
-    ap.add_argument("--license", action=argparse.BooleanOptionalAction, default=True,
-                    help="Wayback に保存された export JSON からライセンス情報を取得する（既定）。"
-                         "--no-license で取得せず、ライセンスの列を空にする。--bulk のときだけ有効")
+    ap.add_argument("--bulk", action=argparse.BooleanOptionalAction, default=None,
+                    help=_env_help("bulk", "/record/ 配下を一括で分割取得して突き合わせる。"
+                                   "--no-bulk でレコードごとに照会する"))
+    ap.add_argument("--bulk-page-size", type=int, default=None,
+                    help=_env_help("bulk_page_size", "--bulk の 1 回あたり取得行数"))
+    ap.add_argument("--license", action=argparse.BooleanOptionalAction, default=None,
+                    help=_env_help("license", "Wayback に保存された export JSON からライセンス情報を"
+                                   "取得する。--no-license で取得せず、ライセンスの列を空にする。"
+                                   "--bulk のときだけ有効"))
+    ap.add_argument("--env-file", default=None,
+                    help=f"設定ファイル（既定: カレントディレクトリの {DEFAULT_ENV_FILE}。無ければ読まない）。"
+                         "優先順はコマンドライン > 環境変数 > .env > 既定値")
     return ap
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def load_options(argv: Optional[List[str]] = None,
+                 environ: Optional[Dict[str, str]] = None) -> argparse.Namespace:
+    """引数をすべて解析してから（--help はここで終了する）.env を読み、値を補う。"""
+    ap = build_parser()
+    args = ap.parse_args(argv)
+    env_path = Path(args.env_file or DEFAULT_ENV_FILE)
+    dotenv: Dict[str, str] = {}
+    if env_path.is_file():
+        try:
+            dotenv = parse_dotenv(env_path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError) as ex:
+            ap.error(f"{env_path} を読めません（{ex}）")
+        info(f"設定ファイルを読み込み: {env_path}")
+    elif args.env_file:
+        ap.error(f"--env-file に指定したファイルがありません: {env_path}")
+    if environ is None:
+        environ = dict(os.environ)
+    try:
+        for msg in resolve_options(args, environ, dotenv):
+            warn(msg)
+    except ValueError as ex:
+        ap.error(str(ex))
+    args.host = (args.host or "").strip()
+    if not args.host:
+        ap.error("--host か .env の WB_HOST を指定してください")
+    return args
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = load_options(argv)
     if args.license and not args.bulk:
         # export JSON の保存先は、一括取得した CDX の一覧から探すため
         warn("--no-bulk のときはライセンス情報を取得しません（ライセンスの列は空になります）")
@@ -821,7 +947,7 @@ def main() -> int:
 
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    http = Http(args.interval, os.environ.get("WB_CONTACT", "").strip())
+    http = Http(args.interval, args.contact.strip())
 
     entries_path = cache_dir / "irdb_entries.json"
     entries = None if args.refresh else load_entries_cache(entries_path, query)

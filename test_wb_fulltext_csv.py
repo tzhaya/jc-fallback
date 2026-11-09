@@ -683,13 +683,147 @@ def test_collect_licenses_uses_cache_and_refetches_newer_capture():
         assert w.load_license_cache(p, "other") == {}
 
 
+def _opts(argv, environ=None, dotenv_text=None):
+    """手元の .env や os.environ を読まないよう、一時ファイルと dict を渡して load_options を呼ぶ。"""
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "test.env"
+        p.write_text(dotenv_text or "", encoding="utf-8")
+        return w.load_options([*argv, "--env-file", str(p)], environ or {})
+
+
+def _exits(fn):
+    """SystemExit の終了コードを返す（stdout/stderr は捨てる）。終了しなければ None。"""
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            fn()
+        except SystemExit as ex:
+            return ex.code
+    return None
+
+
 def test_parser_defaults_bulk_and_license_on():
-    a = w.build_parser().parse_args(["--host", "h"])
+    a = _opts(["--host", "h"])
     assert a.bulk is True and a.license is True
-    a = w.build_parser().parse_args(["--host", "h", "--no-license"])
+    assert a.out == "wayback_fulltext.csv" and a.cache_dir == ".wb_cache"
+    assert a.interval == 1.0 and a.bulk_page_size == w.BULK_PAGE_SIZE
+    assert a.query is None and a.contact == ""  # query の None は main で --host に補う
+    a = _opts(["--host", "h", "--no-license"])
     assert a.bulk is True and a.license is False
-    a = w.build_parser().parse_args(["--host", "h", "--no-bulk"])
+    a = _opts(["--host", "h", "--no-bulk"])
     assert a.bulk is False
+
+
+def test_parse_dotenv():
+    text = ("# コメント\n\n"
+            "  WB_OUT = out.csv  \n"
+            'WB_QUERY="x y"\n'
+            "WB_CONTACT='a=b#c'\n"
+            "export WB_INTERVAL=2.5\n"
+            "NOEQUAL\n"
+            "=novalue\n")
+    got = w.parse_dotenv(text)
+    assert got["WB_OUT"] == "out.csv"
+    assert got["WB_QUERY"] == "x y"
+    assert got["WB_CONTACT"] == "a=b#c"
+    assert got["WB_INTERVAL"] == "2.5"
+    assert "NOEQUAL" not in got and "" not in got
+
+
+def test_dotenv_with_bom_is_read_as_utf8_sig():
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / ".env"
+        p.write_bytes("WB_HOST=jircas.repo.nii.ac.jp\nWB_QUERY=国際農林\n".encode("utf-8-sig"))
+        a = w.load_options(["--env-file", str(p)], {})
+    assert a.host == "jircas.repo.nii.ac.jp" and a.query == "国際農林"
+
+
+def test_parse_bool():
+    for s in ("true", "TRUE", "1", "yes", "On"):
+        assert w.parse_bool(s) is True, s
+    for s in ("false", "0", "No", "off"):
+        assert w.parse_bool(s) is False, s
+    try:
+        w.parse_bool("maybe")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("maybe で ValueError にならない")
+
+
+def test_options_precedence_cli_env_dotenv_default():
+    dotenv = "WB_HOST=a\nWB_BULK=false\nWB_OUT=dotenv.csv\nWB_INTERVAL=3\nWB_CONTACT=d\n"
+    a = _opts(["--host", "b", "--bulk"], {"WB_OUT": "env.csv"}, dotenv)
+    assert a.host == "b"            # CLI > .env
+    assert a.bulk is True           # CLI > .env
+    assert a.out == "env.csv"       # 環境変数 > .env
+    assert a.interval == 3.0        # .env > 既定値（型変換される）
+    assert a.contact == "d"
+    assert a.cache_dir == ".wb_cache"  # どこにも無ければ既定値
+    a = _opts([], {}, "WB_HOST=a\nWB_LICENSE=off\nWB_BULK_PAGE_SIZE=100\n")
+    assert a.host == "a" and a.license is False and a.bulk_page_size == 100
+
+
+def test_empty_env_contact_overrides_dotenv():
+    a = _opts(["--host", "h"], {"WB_CONTACT": ""}, "WB_CONTACT=d\n")
+    assert a.contact == ""
+
+
+def test_invalid_lower_setting_can_be_overridden_by_cli():
+    # 採用しない値は変換しない（P2-1 の回帰テスト）
+    a = _opts(["--host", "h", "--interval", "1"], {}, "WB_INTERVAL=abc\n")
+    assert a.interval == 1.0
+    a = _opts(["--host", "h", "--no-bulk"], {}, "WB_BULK=maybe\n")
+    assert a.bulk is False
+    a = _opts(["--host", "h"], {"WB_INTERVAL": "2"}, "WB_INTERVAL=abc\n")
+    assert a.interval == 2.0
+
+
+def test_invalid_adopted_setting_reports_key():
+    import contextlib
+    import io
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        try:
+            _opts(["--host", "h"], {}, "WB_INTERVAL=abc\n")
+        except SystemExit as ex:
+            assert ex.code == 2
+        else:
+            raise AssertionError("不正な WB_INTERVAL で終了しない")
+    assert "WB_INTERVAL" in err.getvalue() and ".env" in err.getvalue()
+
+
+def test_help_works_even_if_dotenv_is_broken():
+    # P2-2 の回帰テスト: 設定が壊れていてもヘルプは表示できる
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "bad.env"
+        p.write_bytes(b"WB_INTERVAL=abc\nWB_BULK=maybe\n\xff\xfe")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                w.main(["--help", "--env-file", str(p)])
+            except SystemExit as ex:
+                assert ex.code == 0
+            else:
+                raise AssertionError("--help で終了しない")
+    assert "usage" in out.getvalue() and "WB_HOST" in out.getvalue()
+
+
+def test_host_required_and_missing_env_file():
+    assert _exits(lambda: _opts([])) == 2
+    assert _exits(lambda: w.load_options(["--host", "h", "--env-file", "no/such/.env"], {})) == 2
+
+
+def test_unknown_wb_key_warns():
+    args = w.build_parser().parse_args(["--host", "h"])
+    warns = w.resolve_options(args, {}, {"WB_HOTS": "x", "OTHER": "y", "WB_LIMIT": "5"})
+    assert any("WB_HOTS" in m for m in warns)
+    assert any("WB_LIMIT" in m for m in warns)  # --limit は対象外
+    assert not any("OTHER" in m for m in warns)
+    assert args.limit == 0
 
 
 def test_no_license_leaves_license_columns_empty():

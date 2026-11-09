@@ -53,6 +53,7 @@ WB_CONTACT="連絡先メールアドレス(任意)" python wb_fulltext_csv.py --
 | `--refresh` | IRDB の一覧を取り直す |
 | `--cache-dir` | キャッシュの保存先（既定: `.wb_cache`） |
 | `--interval` | リクエスト間隔の秒数（既定: 1.0） |
+| `--env-file` | 設定ファイル（既定: カレントディレクトリの `.env`。無ければ読まない） |
 
 処理は次の順に進みます。
 
@@ -68,10 +69,30 @@ WB_CONTACT="連絡先メールアドレス(任意)" python wb_fulltext_csv.py --
 ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。
 図書館の担当者だけが使う場合は、`--no-license` を付けると、ライセンス情報の取得を省けます。
 
-`WB_CONTACT` は User-Agent に付ける連絡先で、環境変数で渡します。
+`WB_CONTACT` は User-Agent に付ける連絡先で、環境変数か `.env` で渡します。
 Wayback のレート制限は公表されていません。
 既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。
 CDX の応答には、1回あたり 20〜60 秒かかることがあります。
+
+### 設定ファイル（`.env`）
+
+`--limit` と `--refresh` 以外のオプションと `WB_CONTACT` は、カレントディレクトリの `.env` に書いておけます。
+`.env.example` を `.env` という名前でコピーし、値を書き換えてください。
+`.env` があれば、`python wb_fulltext_csv.py` だけで実行できます。
+
+```dotenv
+WB_HOST=jircas.repo.nii.ac.jp
+WB_CONTACT=連絡先メールアドレス
+WB_OUT=result.csv
+WB_LICENSE=false
+```
+
+- キーは `WB_` にオプション名を大文字で続け、`-` を `_` にしたものです（`--cache-dir` は `WB_CACHE_DIR`）。
+- `--bulk` と `--license` は `true` / `false` で指定します（`1` / `0`、`yes` / `no`、`on` / `off` も使えます）。
+- 1 行に 1 項目を書きます。`#` で始まる行はコメントです。値は `"` か `'` で囲んでもかまいません。行末のコメントは書けません。
+- 文字コードは UTF-8 です（BOM 付きでもかまいません）。
+- 同じ項目を複数の場所で指定したときは、コマンドライン、環境変数、`.env`、既定値の順に優先します。
+- `.env` は `.gitignore` で Git の管理から外しています。
 
 テストは次のコマンドで実行します。
 

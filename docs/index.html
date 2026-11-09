@@ -246,6 +246,7 @@ footer p { margin: 0 0 4px; }
           <tr><td><code>--refresh</code></td><td>IRDB の一覧を取り直す</td></tr>
           <tr><td><code>--cache-dir</code></td><td>キャッシュの保存先（既定: <code>.wb_cache</code>）</td></tr>
           <tr><td><code>--interval</code></td><td>リクエスト間隔の秒数（既定: 1.0）</td></tr>
+          <tr><td><code>--env-file</code></td><td>設定ファイル（既定: カレントディレクトリの <code>.env</code>。無ければ読まない）</td></tr>
         </tbody>
       </table>
     </div>
@@ -259,7 +260,21 @@ footer p { margin: 0 0 4px; }
     </ol>
     <p>既定の <code>--bulk</code> は、アイテムごとに照会するかわりに <code>/record/</code> 配下をまとめて取得するので、通信回数が少なくて済みます。</p>
     <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
-    <p><code>WB_CONTACT</code> は User-Agent に付ける連絡先で、環境変数で渡します。Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。CDX の応答には、1回あたり 20〜60 秒かかることがあります。</p>
+    <p><code>WB_CONTACT</code> は User-Agent に付ける連絡先で、環境変数か <code>.env</code> で渡します。Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。CDX の応答には、1回あたり 20〜60 秒かかることがあります。</p>
+    <h3>設定ファイル（<code>.env</code>）</h3>
+    <p><code>--limit</code> と <code>--refresh</code> 以外のオプションと <code>WB_CONTACT</code> は、カレントディレクトリの <code>.env</code> に書いておけます。<code>.env.example</code> を <code>.env</code> という名前でコピーし、値を書き換えてください。<code>.env</code> があれば、<code>python wb_fulltext_csv.py</code> だけで実行できます。</p>
+    <pre tabindex="0"><code>WB_HOST=jircas.repo.nii.ac.jp
+WB_CONTACT=連絡先メールアドレス
+WB_OUT=result.csv
+WB_LICENSE=false</code></pre>
+    <ul>
+      <li>キーは <code>WB_</code> にオプション名を大文字で続け、<code>-</code> を <code>_</code> にしたものです（<code>--cache-dir</code> は <code>WB_CACHE_DIR</code>）。</li>
+      <li><code>--bulk</code> と <code>--license</code> は <code>true</code> / <code>false</code> で指定します（<code>1</code> / <code>0</code>、<code>yes</code> / <code>no</code>、<code>on</code> / <code>off</code> も使えます）。</li>
+      <li>1 行に 1 項目を書きます。<code>#</code> で始まる行はコメントです。値は <code>"</code> か <code>'</code> で囲んでもかまいません。行末のコメントは書けません。</li>
+      <li>文字コードは UTF-8 です（BOM 付きでもかまいません）。</li>
+      <li>同じ項目を複数の場所で指定したときは、コマンドライン、環境変数、<code>.env</code>、既定値の順に優先します。</li>
+      <li><code>.env</code> は <code>.gitignore</code> で Git の管理から外しています。</li>
+    </ul>
   </section>
 
   <section id="columns">

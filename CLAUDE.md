@@ -15,7 +15,9 @@
 
 ## ファイル
 - `wb_fulltext_csv.py`: App 1 本体（標準ライブラリのみ）。使い方は先頭の docstring。
-- 取得対象は実行時に `--host`（必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホスト）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
+- オプションは `.env`（カレントディレクトリ、`--env-file` で変更。`utf-8-sig`）にも書ける（Issue #3、2026-11-09）。キーは `WB_` + オプション名（`ENV_OPTIONS`。`--limit`/`--refresh` は対象外、`WB_CONTACT` を含む）。優先順はコマンドライン > 環境変数 > `.env` > 既定値。argparse の既定値は `None` にし、`resolve_options` が**採用した値だけ**を型変換する（下位の不正値を CLI で上書きできるように）。`.env` は引数の解析後に読む（壊れていても `--help` が出るように）。未知の `WB_*` キーは警告。テストは手元の `.env` を読まないよう `--env-file` と dict の環境変数を渡す。
+- README.md と `docs/index.html` は使い方（オプション表など）を二重に書いている。片方を直したらもう片方にも反映する。
+- 取得対象は実行時に `--host`（または `.env` の `WB_HOST`。どちらか必須）で指定する。`--query` の既定は `--host` と同じ。キャッシュ（`irdb_entries.json` は検索条件、`cdx*.jsonl` はホスト）は条件ごとに識別し、不一致は再利用しない（旧形式のキャッシュは無効扱いで取り直す）。JSONL は追記前に壊れた末尾を除去する。IRDB 一覧は実際の取得件数でページ送りし、totalResults に達する前に空ページが来たらキャッシュせず終了する。
 - `viewer_staff.html`（担当者向け。全 PDF へのリンク、ライセンス列、「CC のみ」絞り込み）と `docs/sample/viewer_public.html`（一般公開向け。CC と判定した PDF にだけ Wayback へのリンクを出す。初期状態は CC のみ表示）。両者は `PUBLIC` 定数と見出し・注記だけが違う。片方を直したらもう片方にも反映する。旧名は `viewer.html` と `docs/sample/view.html`（2026-11-08 に改名）。
 - ライセンスの判定（`license_for_file`）: 権利情報の URI か本文の CC URL、またはファイルの `licensetype`（license_0〜12）を CC とし、**NC/ND 付きも CC と同じ扱い**（利用者の判断）。CC の種類が食い違う、または `license_no` なのに権利情報が CC のものは `check`（要確認）。export JSON の取得結果は `export_json.jsonl` にキャッシュし、CDX に新しい capture が現れたら取り直す。最新の capture が通信エラーで取れず古い capture で判定したときは、`latest` に使った capture の timestamp を入れ、次回の実行で最新を取り直す（PR #1 の Codex レビューで指摘）。
 - `extension/`: App 2。`lib.js`（DOM に依存しない判定ロジック。content script・Service Worker・Node テストで共有）、`content.js`（IRDB の表を th の見出し〈ファイル/File、権利情報/Rights、資源識別子/Identifier、アクセス権/Accessrights〉で読み、パネルを表の直前に挿入）、`background.js`（CDX 照会とキャッシュ）、`content.css`、`manifest.json`。テストは `node --test extension/test/*.test.js`（Node 標準のみ。DOM 部分は対象外で、IRDB の実ページ 9 件にスクリプトを注入して確認した）。
