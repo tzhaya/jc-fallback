@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """IRDB OpenSearch から機関リポジトリのアイテムを列挙し、本文ファイル(PDF)の
-Wayback Machine 上の最新アーカイブ URL を CSV に出力する（標準ライブラリのみ）。
+Wayback Machine 上の最新のアーカイブ版の URL を CSV に出力する（標準ライブラリのみ）。
 
 流れ:
   1. IRDB OpenSearch (fulltext=1, Atom) で全件取得し、URI のホストで自機関分に絞る
@@ -12,7 +12,8 @@ Wayback Machine 上の最新アーカイブ URL を CSV に出力する（標準
 注意:
   - CDX の mimetype は信頼しない。実測で PDF が application/octet-stream になる例が
     あったため、判定は URL の拡張子 (.pdf) で行い、mimetype は参考列として残す。
-  - Wayback はクローラの到達結果しか保存しない。保存が無いものは status=no_capture。
+  - Wayback はクローラが到達したものしかアーカイブしない。PDF のスナップショットが見つからない
+    ものは status=no_capture。
   - レート制限は公式に未公表。既定は 1 リクエスト/秒、429/503 は待って再試行する。
 
 使い方:
@@ -21,9 +22,9 @@ Wayback Machine 上の最新アーカイブ URL を CSV に出力する（標準
   python3 wb_fulltext_csv.py --host HOST --no-bulk --out result.csv     # レコードごとに CDX を照会する
   python3 wb_fulltext_csv.py --host HOST --limit 20 --out smoke.csv     # スモーク
 既定は --bulk（/record/ 配下の一括取得）と --license（ライセンス情報の取得）。
---license は、Wayback に保存された WEKO3 の /records/{id}/export/json を 1 件ずつ取得し、
+--license は、Wayback にアーカイブされた WEKO3 の /records/{id}/export/json を 1 件ずつ取得し、
 権利情報とファイルの licensetype から CC ライセンスかどうかを判定する（初回は数百件で数十分かかる。
-結果はキャッシュし、2 回目以降は新しい保存が現れたものだけ取り直す）。--no-license では
+結果はキャッシュし、2 回目以降は新しいスナップショットが現れたものだけ取り直す）。--no-license では
 ライセンスの列を空にする。--no-bulk のときもライセンス情報は取得しない。
 --host は対象リポジトリのホスト（必須）。--query（IRDB の q）の既定は --host と同じ。
 --limit と --refresh 以外のオプションと WB_CONTACT は、カレントディレクトリの .env に
@@ -33,23 +34,25 @@ WB_HOST=jircas.repo.nii.ac.jp のように書いておける（キーは WB_ + �
 中断しても、同じ --cache-dir で再実行すれば取得済みの分は再利用される。
 キャッシュは検索条件（IRDB 一覧）とホスト・照会条件（CDX）ごとに識別され、条件が違えば再利用しない。
 
-保存履歴の digest（Issue #5）:
-  CDX の digest（Wayback が保存したバイト列の SHA-1）を、同じ本文 URL の capture どうしで比べ、
-  integrity_status（consistent / changed / single / unknown）を CSV に出す。比べるのは取得済みの
-  比較可能な履歴だけで、digest の一致は真正性を保証しない。changed はバイト列の差異であり、
-  内容の変更（正規の差し替えと改ざんは区別できない）のほか、途中で切れた保存や gzip のまま
-  保存されたものでも起きる。changed でも archive_url は出す（判断は利用者が行う）。
-  --capture-before 2026-10-28 のように指定すると、UTC でその日時より前（未満）の保存版から
-  最新のものを採用する（日付だけなら 00:00:00 UTC = 日本時間 09:00）。上限より後にしか保存が無い
-  ファイルは status=after_cutoff になる。ライセンス判定に使う export JSON にも同じ上限を適用する。
+スナップショットの履歴の digest 値（Issue #5）:
+  CDX の digest 値（Wayback が記録したバイト列の SHA-1）を、同じ本文 URL のスナップショットどうしで
+  比べ、integrity_status（consistent / changed / single / unknown）を CSV に出す。比べるのは取得済みの
+  比較可能な履歴だけで、digest 値の一致は真正性を保証しない。changed はバイト列の差異であり、
+  内容の変更（意図した差し替えかどうかは digest 値からは分からない）のほか、途中で切れた
+  スナップショットや、gzip のままアーカイブされたものでも起きる。changed でも archive_url は出す
+  （判断は利用者が行う）。
+  --capture-before 2026-10-28 のように指定すると、UTC でその日時より前（未満）のスナップショットから
+  最新のものを採用する（日付だけなら 00:00:00 UTC = 日本時間 09:00）。上限より後にしかスナップショットが
+  無いファイルは status=after_cutoff になる。ライセンス判定に使う export JSON にも同じ上限を適用する。
   上限の指定はリスクを下げる手段であり、安全を保証しない。
 
 途中で切れている可能性（Issue #7）:
-  採用した保存版より length が大きく、digest の違う保存版があれば possibly_truncated=1 にする
-  （クローラのサイズ上限で途中までしか保存されず、開けない PDF がある）。採用は変えない。
-  larger_capture_date は全期間でいちばん大きい版の保存日、alt_capture_date と alt_archive_url は
-  上限より前でいちばん大きい版（同じ長さなら新しいもの）。CDX の length は圧縮後の長さなので推定にすぎず、
-  正規の差し替えや gzip のまま保存された版でも 1 になり、保存が 1 件だけのものは検出できない。
+  採用したスナップショットより length が大きく、digest 値の違うスナップショットがあれば
+  possibly_truncated=1 にする（クローラのサイズ上限で途中までしかアーカイブされず、開けない PDF が
+  ある）。採用は変えない。larger_capture_date は全期間でいちばん大きいスナップショットのアーカイブ日、
+  alt_capture_date と alt_archive_url は上限より前でいちばん大きいもの（同じ長さなら新しいもの）。
+  CDX の length は圧縮後の WARC レコード長なので推定にすぎず、意図した差し替えや gzip のまま
+  アーカイブされた版でも 1 になり、スナップショットが 1 件だけのものは検出できない。
   空は「この条件に当たらない」という意味で、正常を確かめたものではない。
 """
 
@@ -99,10 +102,10 @@ CSV_COLUMNS = [
     "n_captures", "item_files_captured", "archive_url",
     *("license_status", "license", "rights", "rights_uri", "licensetype",
       "license_capture_date", "license_source_url"),
-    # 保存履歴の digest の比較（Issue #5）。既存の列の位置を変えないよう末尾に足す
+    # スナップショットの履歴の digest 値の比較（Issue #5）。既存の列の位置を変えないよう末尾に足す
     *("capture_digest", "digest_variants", "integrity_status", "digest_first_seen",
       "later_digest_date"),
-    # 途中で切れている可能性（Issue #7）。採用版が digest の違う保存版より小さいもの
+    # 途中で切れている可能性（Issue #7）。採用したスナップショットが、digest 値の違うものより小さい
     *TRUNCATION_COLUMNS,
 ]
 
@@ -273,7 +276,7 @@ def _largest(caps: List[dict]) -> Optional[dict]:
 
 def truncation_check(caps: List[dict], digests: List[str], adopted: Optional[dict],
                      before: str = "") -> dict:
-    """採用版が、digest の違うほかの保存版より小さいか（途中で切れている可能性）を調べる（Issue #7）。
+    """採用したスナップショットが、digest 値の違うほかのスナップショットより小さいか（途中で切れている可能性）を調べる（Issue #7）。
 
     比較対象は、digest が欠損しておらず採用版と違い、length が整数として読めて採用版より大きい capture。
     CDX の length は圧縮後の WARC レコード長なので、これは本文サイズの推定にすぎない。
@@ -374,8 +377,8 @@ def capture_date(timestamp: str) -> str:
 def build_rows(entry: dict, rid: str, cdx_rows: List[dict], before: str = "") -> List[dict]:
     """1 アイテム分の CSV 行（PDF ごとに 1 行。無ければ状態だけの 1 行）を作る。
 
-    `item_files_captured` は、このアイテムで保存を確認でき、上限より前の保存版を採用できた PDF の数。
-    保存されなかったファイルは CDX に現れないため、部分保存は検出できない
+    `item_files_captured` は、このアイテムでスナップショットを確認でき、上限より前のものを採用できた PDF の数。
+    アーカイブされなかったファイルは CDX に現れないため、一部のファイルだけがアーカイブされている場合は検出できない
     （アイテムのファイル総数は IRDB からも CDX からも分からない）。
 
     `before` を指定したとき、上限より後にしか有効な capture が無いファイルは `after_cutoff` の行にする。
@@ -430,7 +433,7 @@ _ITEM_STATUS_RANK = {"ok": 2, "after_cutoff": 1}
 
 
 def summarize(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
-    """(アイテム単位の status 内訳, ok 行 = 保存を確認できた PDF の総数) を返す。
+    """(アイテム単位の status 内訳, ok 行 = スナップショットを確認できた PDF の総数) を返す。
 
     アイテム単位では、PDF が複数あっても 1 件と数え、ok > after_cutoff > その他の順で代表させる。
     """
@@ -453,7 +456,7 @@ INTEGRITY_ORDER = ("consistent", "changed", "single", "unknown")
 
 def summarize_integrity(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
     """ファイル単位（ok と after_cutoff の行）の integrity_status の内訳と、
-    採用した保存版より後に別の digest を観測したファイルの数を返す。"""
+    採用したスナップショットより後に別の digest 値を観測したファイルの数を返す。"""
     by: Dict[str, int] = {}
     later = 0
     for r in rows:
@@ -503,7 +506,7 @@ def describe_before(before: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ライセンス情報（Wayback に保存された WEKO3 の /records/{id}/export/json から読む）
+# ライセンス情報（Wayback にアーカイブされた WEKO3 の /records/{id}/export/json から読む）
 # ---------------------------------------------------------------------------
 
 _EXPORT_JSON_RE = re.compile(r"^/records/(\d+)/export/json$")
@@ -641,7 +644,7 @@ def decode_body(data: bytes, content_encoding: str = "") -> str:
 
 
 def summarize_licenses(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
-    """(アイテム単位の license_status 内訳, PDF の保存があり CC の行を持つアイテム数) を返す。
+    """(アイテム単位の license_status 内訳, PDF のスナップショットがあり CC の行を持つアイテム数) を返す。
 
     アイテムの代表値は、CC の行があれば cc、なければ最初の行の値とする。
     """
@@ -1065,7 +1068,7 @@ def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[s
             cache[rid] = obj
             if obj["latest"] != export_caps[rid][0]["timestamp"]:
                 errors += 1
-                warn(f"record {rid}: 最新の export JSON を取得できず、古い保存で判定しました"
+                warn(f"record {rid}: 最新の export JSON を取得できず、古いスナップショットで判定しました"
                      "（次回の実行で取り直します）")
             if i % 50 == 0:
                 info(f"export JSON: {i}/{len(todo)} 件")
@@ -1074,10 +1077,10 @@ def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[s
 
 
 NO_JSON_REASONS = {
-    "no_export": "export JSON の有効な保存（status 200、length が正）が無い",
-    "none_before": "export JSON の保存はあるが、指定日時より前の保存が無い",
+    "no_export": "export JSON の有効なスナップショット（status 200、length が正）が無い",
+    "none_before": "export JSON のスナップショットはあるが、指定日時より前のものが無い",
     "fetch_failed": "通信エラーで取得できなかった（次回の実行で取り直す）",
-    "unreadable": "試した保存がすべて 404 か JSON でなかった",
+    "unreadable": "試したスナップショットがすべて 404 か JSON でなかった",
 }
 
 
@@ -1225,15 +1228,15 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--bulk-page-size", type=int, default=None,
                     help=_env_help("bulk_page_size", "--bulk の 1 回あたり取得行数"))
     ap.add_argument("--license", action=argparse.BooleanOptionalAction, default=None,
-                    help=_env_help("license", "Wayback に保存された export JSON からライセンス情報を"
+                    help=_env_help("license", "Wayback にアーカイブされた export JSON からライセンス情報を"
                                    "取得する。--no-license で取得せず、ライセンスの列を空にする。"
                                    "--bulk のときだけ有効"))
     ap.add_argument("--capture-before", type=_cli_capture_before, default=None, metavar="DATE",
                     help=_env_help("capture_before",
-                                   "採用する保存版の日時の上限。UTC で、この日時より前（未満）の保存版から"
+                                   "採用するスナップショットの日時の上限。UTC で、この日時より前（未満）のスナップショットから"
                                    "最新の有効なものを選ぶ。YYYY-MM-DD、YYYYMMDD、YYYYMMDDhhmmss で指定し、"
                                    "日付だけなら 00:00:00 UTC（日本時間 09:00）。例: 2026-10-28 は "
-                                   "2026-10-28 00:00:00 UTC より前。digest の比較は上限より後も含む全期間で行う。"
+                                   "2026-10-28 00:00:00 UTC より前。digest 値の比較は上限より後も含む全期間で行う。"
                                    "ライセンス判定に使う export JSON にも適用する。空文字で制限なし",
                                    "制限なし"))
     ap.add_argument("--env-file", default=None,
@@ -1273,14 +1276,14 @@ def load_options(argv: Optional[List[str]] = None,
 def main(argv: Optional[List[str]] = None) -> int:
     args = load_options(argv)
     if args.license and not args.bulk:
-        # export JSON の保存先は、一括取得した CDX の一覧から探すため
+        # export JSON のスナップショットは、一括取得した CDX の一覧から探すため
         warn("--no-bulk のときはライセンス情報を取得しません（ライセンスの列は空になります）")
         args.license = False
     host = args.host.strip().lower()
     query = args.query if args.query else host
     before = args.capture_before or ""
     if before:
-        info(f"採用する保存版の日時の上限: {describe_before(before)}")
+        info(f"採用するスナップショットの日時の上限: {describe_before(before)}")
 
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1328,7 +1331,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             bulk_rows = fetch_bulk(http, host, cache_dir / "cdx_bulk.jsonl", args.bulk_page_size)
         except Exception as ex:  # noqa: BLE001
-            # 取得が不完全なまま突き合わせると、保存済みを no_capture と誤判定する
+            # 取得が不完全なまま突き合わせると、アーカイブ済みのものを no_capture と誤判定する
             warn(f"バルク取得に失敗 ({ex})。CSV は出力しません。同じコマンドで再実行すると続きから進みます")
             return 1
         bulk = group_by_record(bulk_rows)
@@ -1336,8 +1339,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.license:
             export_all = group_export_json(bulk_rows)
             export_caps = group_export_json(bulk_rows, before)
-            info(f"export JSON の保存があるレコード: {len(export_all)} 件"
-                 + (f"（うち指定日時より前の保存があるもの {len(export_caps)} 件）" if before else ""))
+            info(f"export JSON のスナップショットがあるレコード: {len(export_all)} 件"
+                 + (f"（うち指定日時より前のスナップショットがあるもの {len(export_caps)} 件）" if before else ""))
             licenses, license_errors = collect_licenses(
                 http, host, [rid for _, rid in targets], export_caps,
                 cache_dir / "export_json.jsonl", before)
@@ -1385,26 +1388,26 @@ def main(argv: Optional[List[str]] = None) -> int:
          + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())))
     if judged:
         ok_items = by_status.get("ok", 0)
-        label = ("指定日時より前の保存版を確認できた率" if before else "アイテム単位の保存確認率")
+        label = ("指定日時より前のスナップショットを確認できた率" if before else "アイテム単位のアーカイブ版を確認できた率")
         info(f"{label}: {ok_items}/{judged} = {ok_items / judged:.1%}"
-             "（1 件でも PDF の保存を確認できたアイテム。部分保存は検出できない）")
+             "（1 件でも PDF のスナップショットを確認できたアイテム。一部のファイルだけがアーカイブされている場合は検出できない）")
         if before and by_status.get("after_cutoff"):
-            info(f"指定日時以降の保存しか無いアイテム（after_cutoff）: {by_status['after_cutoff']} 件")
-    info(f"ファイル単位: 保存を確認できた PDF {pdf_files} 件（ok の行数）")
+            info(f"指定日時以降のスナップショットしか無いアイテム（after_cutoff）: {by_status['after_cutoff']} 件")
+    info(f"ファイル単位: スナップショットを確認できた PDF {pdf_files} 件（ok の行数）")
     by_int, later = summarize_integrity(out_rows)
     if by_int:
-        info("保存履歴の digest（ファイル単位。取得済みの比較可能な履歴での判定）: "
+        info("スナップショットの履歴の digest 値（ファイル単位。取得済みの比較可能な履歴での判定）: "
              + ", ".join(f"{k}={by_int[k]}" for k in INTEGRITY_ORDER if k in by_int))
-        info(f"採用した保存版より後に、別の digest の保存を観測したファイル: {later} 件")
+        info(f"採用したスナップショットより後に、別の digest 値のスナップショットを観測したファイル: {later} 件")
         n_trunc, n_alt = summarize_truncation(out_rows)
-        info(f"採用した保存版が、digest の違う保存版より小さいファイル（途中で切れている可能性）: "
-             f"{n_trunc} 件（うち、{'基準日時より前に' if before else ''}大きい保存版へのリンクを出せるもの "
+        info(f"採用したスナップショットが、digest 値の違うものより小さいファイル（途中で切れている可能性）: "
+             f"{n_trunc} 件（うち、{'基準日時より前に' if before else ''}大きいアーカイブ版へのリンクを出せるもの "
              f"{n_alt} 件）")
     if licenses is not None:
         by_lic, ok_cc = summarize_licenses(out_rows)
         info("ライセンス（アイテム単位）: "
              + ", ".join(f"{k}={v}" for k, v in sorted(by_lic.items())))
-        info(f"PDF の保存があり、ライセンスが CC のアイテム: {ok_cc} 件")
+        info(f"PDF のスナップショットがあり、ライセンスが CC のアイテム: {ok_cc} 件")
         reasons = license_missing_reasons([rid for _, rid in targets], export_all, export_caps,
                                           licenses)
         for k, text in NO_JSON_REASONS.items():

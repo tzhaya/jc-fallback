@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JAIRO Cloud メタデータ取得・検索ツール</title>
-<meta name="description" content="機関リポジトリの本文 PDF が Wayback Machine に保存されているかを調べ、CSV に出力するツールと、その CSV を検索する静的ページ、IRDB の詳細ページに保存版へのリンクを表示するブラウザ拡張機能です。">
+<meta name="description" content="機関リポジトリの本文 PDF が Wayback Machine にアーカイブされているかを調べ、CSV に出力するツールと、その CSV を検索する静的ページ、IRDB の詳細ページにアーカイブ版へのリンクを表示するブラウザ拡張機能です。">
 <style>
 /* デザイントークンは @digital-go-jp/design-tokens 2.1.0 の値 */
 :root {
@@ -175,7 +175,7 @@ footer p { margin: 0 0 4px; }
 <header class="site">
   <div class="container">
     <h1>JAIRO Cloud メタデータ取得・検索ツール</h1>
-    <p>JAIRO Cloud が停止している間の応急手段として作成した、機関リポジトリの本文 PDF の保存状況を調べるツールです。</p>
+    <p>JAIRO Cloud が停止している間の応急手段として作成した、機関リポジトリの本文 PDF のアーカイブ状況を調べるツールです。</p>
     <div class="actions">
       <a class="button" href="sample/viewer_public.html">サンプルを開く</a>
       <a href="https://github.com/tzhaya/jc-fallback">GitHub のリポジトリ</a>
@@ -201,10 +201,10 @@ footer p { margin: 0 0 4px; }
 
   <section id="about">
     <h2>概要</h2>
-    <p>本文 PDF が Internet Archive の Wayback Machine に保存されているかを調べ、保存版へのリンクを示します。用途に応じて、次の2つの方法を使い分けます。</p>
+    <p>本文 PDF が Internet Archive の Wayback Machine にアーカイブされているかを調べ、アーカイブ版へのリンクを示します。用途に応じて、次の2つの方法を使い分けます。</p>
     <ul>
-      <li><strong>CSV 出力ツール</strong>：機関リポジトリから IRDB にハーベストされたメタデータを取得し、保存状況を CSV ファイルに出力します。出力した CSV ファイルは、静的な HTML ページで簡易に検索できます。ページは、担当者向けの <code>viewer_staff.html</code> と、一般公開向けの <code>docs/sample/viewer_public.html</code> の2種類です。Python の標準ライブラリだけで動作し、追加のインストールは要りません。</li>
-      <li><strong>ブラウザ拡張機能</strong>：IRDB の詳細ページに、保存版へのリンクを表示します。CSV を作らずに使えるので、登録件数が多い機関に向いています（<a href="#extension">後述</a>）。</li>
+      <li><strong>CSV 出力ツール</strong>：機関リポジトリから IRDB にハーベストされたメタデータを取得し、アーカイブ状況を CSV ファイルに出力します。出力した CSV ファイルは、静的な HTML ページで簡易に検索できます。ページは、担当者向けの <code>viewer_staff.html</code> と、一般公開向けの <code>docs/sample/viewer_public.html</code> の2種類です。Python の標準ライブラリだけで動作し、追加のインストールは要りません。</li>
+      <li><strong>ブラウザ拡張機能</strong>：IRDB の詳細ページに、アーカイブ版へのリンクを表示します。CSV を作らずに使えるので、登録件数が多い機関に向いています（<a href="#extension">後述</a>）。</li>
     </ul>
   </section>
 
@@ -212,10 +212,10 @@ footer p { margin: 0 0 4px; }
     <h2>ご注意</h2>
     <div class="notice">
       <ul>
-        <li>元の機関リポジトリにあるすべての PDF ファイルが、Wayback Machine に保存されているとは限りません。保存されるのは、クローラが到達したものだけです。</li>
-        <li>ランディングページが Wayback Machine に保存されていても、PDF ファイルは保存されていないことがあります。</li>
-        <li>新しく登録されたアイテムほど、保存されていない傾向があります。国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% のアイテムが Wayback Machine に保存されていました。レコード番号が 2000900 未満のアイテムでは 95% が保存されていたのに対し、2000900 以上では 42% でした。</li>
-        <li>CSV 出力ツールは、Wayback Machine に保存された各アイテムのメタデータからライセンスを判定します。メタデータが保存されていないアイテムは判定できません。国際農研のリポジトリ（906 件）で 2026-11-08 に確認したところ、メタデータを取得できたのは 677 件で、CC ライセンスと判定できたのは 34 件（うち PDF を取得できるものは 33 件）でした。</li>
+        <li>元の機関リポジトリにあるすべての PDF ファイルが、Wayback Machine にアーカイブされているとは限りません。アーカイブされるのは、クローラが到達したものだけです。</li>
+        <li>ランディングページが Wayback Machine にアーカイブされていても、PDF ファイルはアーカイブされていないことがあります。</li>
+        <li>新しく登録されたアイテムほど、アーカイブされていない傾向があります。国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% のアイテムが Wayback Machine にアーカイブされていました。レコード番号が 2000900 未満のアイテムでは 95% がアーカイブされていたのに対し、2000900 以上では 42% でした。</li>
+        <li>CSV 出力ツールは、Wayback Machine にアーカイブされた各アイテムのメタデータからライセンスを判定します。メタデータがアーカイブされていないアイテムは判定できません。国際農研のリポジトリ（906 件）で 2026-11-08 に確認したところ、メタデータを取得できたのは 677 件で、CC ライセンスと判定できたのは 34 件（うち PDF を取得できるものは 33 件）でした。</li>
         <li>提供されているファイルのライセンスやメタデータの詳細は、IRDB 上で確認してください。</li>
         <li>取得した PDF を再公開したり、他機関に提供したりするときは、元のファイルのライセンスに従ってください。Internet Archive の利用条件と、IRDB 上のメタデータに書かれたライセンス情報を確かめ、提供機関にも確認してください。</li>
       </ul>
@@ -241,8 +241,8 @@ footer p { margin: 0 0 4px; }
           <tr><td><code>--query</code></td><td>IRDB OpenSearch の <code>q</code>（既定: <code>--host</code> と同じ）</td></tr>
           <tr><td><code>--out</code></td><td>出力する CSV（既定: <code>wayback_fulltext.csv</code>）</td></tr>
           <tr><td><code>--bulk</code> / <code>--no-bulk</code></td><td><code>/record/</code> 配下を一括で分割取得して突き合わせる（既定）。<code>--no-bulk</code> ではアイテムごとに照会する</td></tr>
-          <tr><td><code>--license</code> / <code>--no-license</code></td><td>Wayback に保存された各アイテムのメタデータ（WEKO3 の <code>export/json</code>）から、ライセンス情報を取得する（既定）。初回は数百件で数十分かかる。<code>--no-license</code> では取得せず、ライセンスの列を空にする。<code>--no-bulk</code> のときも取得しない</td></tr>
-          <tr><td><code>--capture-before DATE</code></td><td>採用する保存版の日時の上限（既定: 制限なし）。UTC で、この日時より前（未満）の保存版から最新のものを選ぶ。<code>YYYY-MM-DD</code>、<code>YYYYMMDD</code>、<code>YYYYMMDDhhmmss</code> で指定する。日付だけなら 00:00:00 UTC（日本時間 09:00）で、<code>2026-10-28</code> は「2026-10-28 00:00:00 UTC より前」。ライセンス判定に使うメタデータにも適用する</td></tr>
+          <tr><td><code>--license</code> / <code>--no-license</code></td><td>Wayback にアーカイブされた各アイテムのメタデータ（WEKO3 の <code>export/json</code>）から、ライセンス情報を取得する（既定）。初回は数百件で数十分かかる。<code>--no-license</code> では取得せず、ライセンスの列を空にする。<code>--no-bulk</code> のときも取得しない</td></tr>
+          <tr><td><code>--capture-before DATE</code></td><td>採用するスナップショットの日時の上限（既定: 制限なし）。UTC で、この日時より前（未満）のスナップショットから最新のものを選ぶ。<code>YYYY-MM-DD</code>、<code>YYYYMMDD</code>、<code>YYYYMMDDhhmmss</code> で指定する。日付だけなら 00:00:00 UTC（日本時間 09:00）で、<code>2026-10-28</code> は「2026-10-28 00:00:00 UTC より前」。ライセンス判定に使うメタデータにも適用する</td></tr>
           <tr><td><code>--limit N</code></td><td>動作確認用に、先頭の N 件だけを処理する</td></tr>
           <tr><td><code>--refresh</code></td><td>IRDB の一覧を取り直す</td></tr>
           <tr><td><code>--cache-dir</code></td><td>キャッシュの保存先（既定: <code>.wb_cache</code>）</td></tr>
@@ -256,11 +256,11 @@ footer p { margin: 0 0 4px; }
     <ol>
       <li>IRDB の <a href="https://support.irdb.nii.ac.jp/ja/about/manual/opensearch">OpenSearch API</a> で、対象ホストのアイテムを列挙します。</li>
       <li>本文 URL を Wayback Machine の CDX API に照会します。</li>
-      <li>PDF ごとに、最新の保存を選びます（<code>--capture-before</code> を指定したときは、その日時より前の保存のうち最新のもの）。あわせて、同じ PDF の保存どうしで内容の要約値（digest）を比べます。</li>
-      <li>Wayback に保存された各アイテムのメタデータを取得し、権利情報とファイルのライセンス種別から、CC ライセンスかどうかを判定します（<code>--no-license</code> のときは行いません）。</li>
+      <li>PDF ごとに、最新のスナップショットを選びます（<code>--capture-before</code> を指定したときは、その日時より前のスナップショットのうち最新のもの）。あわせて、同じ PDF のスナップショットどうしで内容の要約値（digest 値）を比べます。</li>
+      <li>Wayback にアーカイブされた各アイテムのメタデータを取得し、権利情報とファイルのライセンス種別から、CC ライセンスかどうかを判定します（<code>--no-license</code> のときは行いません）。</li>
     </ol>
     <p>既定の <code>--bulk</code> は、アイテムごとに照会するかわりに <code>/record/</code> 配下をまとめて取得するので、通信回数が少なくて済みます。</p>
-    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。CDX のキャッシュには照会条件（取得する項目とフィルタ）も記録し、条件が違う古いキャッシュは削除して取り直します。digest の取得を加えたバージョンに更新した後の初回の実行では、CDX の照会をやり直します（<code>--bulk</code> なら数ページ分ですが、<code>--no-bulk</code> ではアイテムごとに照会し直すので、数百件で数時間かかります）。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
+    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。CDX のキャッシュには照会条件（取得する項目とフィルタ）も記録し、条件が違う古いキャッシュは削除して取り直します。digest 値の取得を加えたバージョンに更新した後の初回の実行では、CDX の照会をやり直します（<code>--bulk</code> なら数ページ分ですが、<code>--no-bulk</code> ではアイテムごとに照会し直すので、数百件で数時間かかります）。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しいスナップショットが現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
     <p><code>WB_CONTACT</code> は User-Agent に付ける連絡先で、環境変数か <code>.env</code> で渡します。Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。CDX の応答には、1回あたり 20〜60 秒かかることがあります。</p>
     <h3>設定ファイル（<code>.env</code>）</h3>
     <p>オプションは、カレントディレクトリの <code>.env</code> に書いておけます。<code>.env.example</code> を <code>.env</code> という名前でコピーし、値を書き換えてください。<code>.env</code> に <code>WB_HOST</code> を書いておけば、<code>python wb_fulltext_csv.py</code> だけで実行できます。</p>
@@ -284,48 +284,48 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
 
   <section id="columns">
     <h2>取得する情報</h2>
-    <p>PDF ファイルごとに1行を出力します。保存が見つからないアイテムは、状態だけを書いた1行になります。</p>
+    <p>PDF ファイルごとに1行を出力します。PDF のスナップショットが見つからないアイテムは、状態だけを書いた1行になります。</p>
     <div class="table-wrap">
       <table>
         <thead><tr><th scope="col">列</th><th scope="col">内容</th></tr></thead>
         <tbody>
-          <tr><td class="wrap-first"><code>status</code></td><td><code>ok</code>（PDF の保存を確認）/ <code>after_cutoff</code>（<code>--capture-before</code> の日時以降の保存しか無い。リンクは出さない）/ <code>no_capture</code>（保存なし）/ <code>no_pdf</code>（PDF 以外のみ、または無効な記録）/ <code>cdx_error</code>（照会に失敗）</td></tr>
+          <tr><td class="wrap-first"><code>status</code></td><td><code>ok</code>（PDF のスナップショットを確認）/ <code>after_cutoff</code>（<code>--capture-before</code> の日時以降のスナップショットしか無い。リンクは出さない）/ <code>no_capture</code>（今回の照会で PDF のスナップショットが見つからなかった。ビューアの表示は「アーカイブ版なし」）/ <code>no_pdf</code>（スナップショットはあるが、PDF 以外のみ、または無効な記録。ビューアの表示は「PDFなし」）/ <code>cdx_error</code>（照会に失敗）</td></tr>
           <tr><td class="wrap-first"><code>title</code>, <code>issn</code>, <code>publicationName</code>, <code>volume</code>, <code>number</code>, <code>startingPage</code>, <code>endingPage</code>, <code>publicationDate</code></td><td>IRDB のメタデータ</td></tr>
           <tr><td><code>updated</code></td><td>IRDB の更新日（個別の登録日ではありません）</td></tr>
           <tr><td class="wrap-first"><code>irdb_url</code>, <code>record_url</code>, <code>record_id</code></td><td>IRDB の詳細ページ、リポジトリの詳細ページ、レコード番号</td></tr>
           <tr><td><code>file_url</code></td><td>本文 PDF の元の URL</td></tr>
-          <tr><td class="wrap-first"><code>capture_timestamp</code>, <code>capture_date</code></td><td>採用した保存の日時と日付（<code>--capture-before</code> が無ければ最新の保存）</td></tr>
+          <tr><td class="wrap-first"><code>capture_timestamp</code>, <code>capture_date</code></td><td>採用したスナップショットの日時と日付（<code>--capture-before</code> が無ければ最新のスナップショット）</td></tr>
           <tr><td class="wrap-first"><code>mimetype</code>, <code>length</code></td><td>CDX の値（参考。PDF でも <code>mimetype</code> が <code>application/octet-stream</code> になることがあります）</td></tr>
-          <tr><td><code>n_captures</code></td><td>そのファイルの保存回数（取得できた有効な保存の数。<code>--capture-before</code> の日時以降も含む）</td></tr>
-          <tr><td><code>item_files_captured</code></td><td>そのアイテムで保存を確認でき、採用できた PDF の数（<code>after_cutoff</code> のファイルは数えない）</td></tr>
+          <tr><td><code>n_captures</code></td><td>そのファイルのスナップショット数（取得できた有効なスナップショットの数。<code>--capture-before</code> の日時以降も含む）</td></tr>
+          <tr><td><code>item_files_captured</code></td><td>そのアイテムでスナップショットを確認でき、採用できた PDF の数（<code>after_cutoff</code> のファイルは数えない）</td></tr>
           <tr><td><code>archive_url</code></td><td>Wayback Machine 上の PDF ファイルの URL（<code>…/web/{timestamp}id_/{original}</code>）</td></tr>
           <tr><td><code>license_status</code></td><td><code>--no-license</code> / <code>--no-bulk</code> のときは空。<code>cc</code>（CC ライセンス。NC や ND の条件が付くものも含む）/ <code>check</code>（要確認。権利情報とファイルのライセンス種別が食い違う）/ <code>not_cc</code>（権利情報はあるが CC ではない）/ <code>no_rights</code>（権利情報なし）/ <code>no_json</code>（メタデータを取得できない）</td></tr>
           <tr><td class="wrap-first"><code>license</code>, <code>rights</code>, <code>rights_uri</code>, <code>licensetype</code></td><td>判定した CC ライセンスの名前（例: <code>CC BY 4.0</code>）、権利情報の本文と URI、ファイルのライセンス種別（WEKO3 の値）</td></tr>
-          <tr><td class="wrap-first"><code>license_capture_date</code>, <code>license_source_url</code></td><td>判定に使ったメタデータの保存日と、Wayback Machine 上の URL</td></tr>
-          <tr><td><code>capture_digest</code></td><td>採用した保存版の digest 値（Wayback Machine が保存したバイト列の SHA-1。欠けていれば空）</td></tr>
-          <tr><td><code>digest_variants</code></td><td>そのファイルの保存のうち、比べられる digest の種類の数</td></tr>
-          <tr><td><code>integrity_status</code></td><td>保存版どうしの digest 値の比較結果。<code>consistent</code>（2回以上の保存がすべて同じ）/ <code>changed</code>（バイト列の違う保存がある。内容の変更とは限らない）/ <code>single</code>（比べられる保存版が1件だけ）/ <code>unknown</code>（digest 値の欠けた保存版があり、判定できない。<code>cdx_error</code> の行も <code>unknown</code>）</td></tr>
-          <tr><td><code>digest_first_seen</code></td><td>採用した保存版と同じ digest 値を最初に観測した日（この内容になった日とは限りません）</td></tr>
-          <tr><td><code>later_digest_date</code></td><td>採用した保存版より後に、別の digest 値を最初に観測した日（変更が起きた日とは限りません）</td></tr>
-          <tr><td><code>possibly_truncated</code></td><td>採用した保存版より <code>length</code> が大きく、digest 値の違う保存があれば <code>1</code>（採用した保存が途中で切れている可能性がある）。比べる相手は全期間の保存です。空は「この条件に当たらない」という意味で、切れていないことを確かめたものではありません</td></tr>
-          <tr><td><code>larger_capture_date</code></td><td><code>possibly_truncated</code> が <code>1</code> のとき、条件を満たす保存版（採用した保存より <code>length</code> が大きく、digest の違うもの）のうち、<code>length</code> がいちばん大きいものの保存日（<code>--capture-before</code> の日時より後の保存版も含む）</td></tr>
-          <tr><td><code>alt_capture_date</code></td><td>別の保存版の保存日。条件を満たす保存版のうち、<code>--capture-before</code> の日時より前で <code>length</code> がいちばん大きいもの（同じ長さなら新しいもの）。無ければ空</td></tr>
-          <tr><td><code>alt_archive_url</code></td><td>別の保存版の原本の URL（<code>id_</code> 指定）。無ければ空</td></tr>
+          <tr><td class="wrap-first"><code>license_capture_date</code>, <code>license_source_url</code></td><td>判定に使ったメタデータのアーカイブ日と、Wayback Machine 上の URL</td></tr>
+          <tr><td><code>capture_digest</code></td><td>採用したスナップショットの digest 値（Wayback Machine が記録したバイト列の SHA-1。欠けていれば空）</td></tr>
+          <tr><td><code>digest_variants</code></td><td>そのファイルのスナップショットのうち、比べられる digest 値の種類の数</td></tr>
+          <tr><td><code>integrity_status</code></td><td>スナップショットどうしの digest 値の比較結果。<code>consistent</code>（2回以上のスナップショットがすべて同じ）/ <code>changed</code>（バイト列の違うスナップショットがある。内容の変更とは限らない）/ <code>single</code>（比べられるスナップショットが1件だけ）/ <code>unknown</code>（digest 値の欠けたスナップショットがあり、判定できない。<code>cdx_error</code> の行も <code>unknown</code>）</td></tr>
+          <tr><td><code>digest_first_seen</code></td><td>採用したスナップショットと同じ digest 値を最初に観測した日（この内容になった日とは限りません）</td></tr>
+          <tr><td><code>later_digest_date</code></td><td>採用したスナップショットより後に、別の digest 値を最初に観測した日（変更が起きた日とは限りません）</td></tr>
+          <tr><td><code>possibly_truncated</code></td><td>採用したスナップショットより <code>length</code> が大きく、digest 値の違うスナップショットがあれば <code>1</code>（採用したアーカイブ版が途中で切れている可能性がある）。比べる相手は全期間のスナップショットです。空は「この条件に当たらない」という意味で、切れていないことを確かめたものではありません</td></tr>
+          <tr><td><code>larger_capture_date</code></td><td><code>possibly_truncated</code> が <code>1</code> のとき、条件を満たすスナップショット（採用したものより <code>length</code> が大きく、digest 値の違うもの）のうち、<code>length</code> がいちばん大きいもののアーカイブ日（<code>--capture-before</code> の日時より後のスナップショットも含む）</td></tr>
+          <tr><td><code>alt_capture_date</code></td><td>別のアーカイブ版のアーカイブ日。条件を満たすスナップショットのうち、<code>--capture-before</code> の日時より前で <code>length</code> がいちばん大きいもの（同じ長さなら新しいもの）。無ければ空</td></tr>
+          <tr><td><code>alt_archive_url</code></td><td>別のアーカイブ版の原本の URL（<code>id_</code> 指定）。無ければ空</td></tr>
         </tbody>
       </table>
     </div>
     <ul>
-      <li>複数のファイルのうち一部だけが保存されている場合も、<code>ok</code> になります。ファイルの不足は検出できません。</li>
-      <li><code>capture_date</code> は、Wayback が最後に保存した日です。その後にリポジトリ側でファイルが差し替えられていても、反映されていません。</li>
-      <li>digest は、Wayback Machine が保存したバイト列の SHA-1 です（<code>id_</code> で取得した本文の SHA-1 と一致することを確かめています）。比較は、取得できた保存どうしで行います。</li>
-      <li><code>consistent</code> は「取得できた比較可能な保存が、すべて同じバイト列だった」という意味です。内容が正しいこと（真正性）は保証しません。たとえば、最初の保存より前に変更や差し替えがされていれば、変更後の内容どうしで一致します。</li>
-      <li><code>changed</code> は「バイト列の違う保存版がある」という意味で、内容が変わったとは限りません。内容の変更（正規の差し替えか改ざんかは区別できません）のほかに、保存版が途中で切れている場合（1 MiB や 5 MiB ちょうどで切れた例があります）や、圧縮（gzip）されたまま保存されている場合も <code>changed</code> になります。</li>
+      <li>複数のファイルのうち一部だけがアーカイブされている場合も、<code>ok</code> になります。ファイルの不足は検出できません。</li>
+      <li><code>capture_date</code> は、Wayback が最後にアーカイブした日です。その後にリポジトリ側でファイルが差し替えられていても、反映されていません。</li>
+      <li>digest 値は、Wayback Machine が記録したバイト列の SHA-1 です（<code>id_</code> で取得した本文の SHA-1 と一致することを確かめています）。比較は、取得できたスナップショットどうしで行います。</li>
+      <li><code>consistent</code> は「取得できた比較可能なスナップショットが、すべて同じバイト列だった」という意味です。内容が正しいこと（真正性）は保証しません。たとえば、最初のスナップショットより前に変更や差し替えがされていれば、変更後の内容どうしで一致します。</li>
+      <li><code>changed</code> は「バイト列の違うスナップショットがある」という意味で、内容が変わったとは限りません。内容の変更（意図した差し替えかどうかは、digest 値からは分かりません）のほかに、アーカイブ版が途中で切れている場合（1 MiB や 5 MiB ちょうどで切れた例があります）や、圧縮（gzip）されたままアーカイブされている場合も <code>changed</code> になります。</li>
       <li><code>changed</code> でも、PDF へのリンク（<code>archive_url</code>）は出します。PDF を開いて内容を確かめ、利用するかどうかを判断してください。</li>
-      <li>Wayback Machine は、大きなファイルを途中までしか保存しないことがあります（1 MiB や 5 MiB ちょうどで切れた例があり、どれも PDF として開けませんでした）。採用した保存より <code>length</code> が大きく、digest の違う保存があれば、<code>possibly_truncated</code> を <code>1</code> にし、別の保存版（<code>alt_archive_url</code>）を示します。採用する保存は変えません。</li>
-      <li><code>possibly_truncated</code> は、CDX の <code>length</code>（圧縮後の長さ）からの推定です。正規の差し替えでファイルが小さくなった場合にも <code>1</code> になります。圧縮（gzip）されたまま保存された版があるときも、その版の <code>length</code> がわずかに大きく出て、<code>1</code> になることがあります。jircas で確かめた、<code>length</code> の差が 2% 未満の 2 件は、どちらも別の版が gzip のまま保存された同じ内容でした（そのうち 1 件を Chrome でダウンロードすると展開され、採用した保存版と同じ PDF になりました）。保存版が1件だけのものや、すべての保存版が同じように切れているものは検出できません。</li>
-      <li>別の保存版は、比較した保存版のうち <code>length</code> がいちばん大きいものです。完全な版であることは保証しません。<code>--capture-before</code> を指定したときは、その日時より前の保存版からだけ選びます。指定の日時より後にしか <code>length</code> が大きい保存版が無いときは、<code>alt_archive_url</code> は空で、<code>larger_capture_date</code> だけが入ります。</li>
-      <li><code>single</code> は「比べられる保存版が1件だけ」という意味です。Wayback に1回しか保存されていないとは限りません（status 200 以外の記録は数えていません）。</li>
-      <li><code>--capture-before</code> は、改ざんの前の保存版を選びやすくする手段です。指定した日時より前の保存が改ざんされていないことは保証しません。日時は UTC で、指定した日時ちょうどの保存は含みません。</li>
+      <li>Wayback Machine は、大きなファイルを途中までしかアーカイブしないことがあります（1 MiB や 5 MiB ちょうどで切れた例があり、どれも PDF として開けませんでした）。採用したスナップショットより <code>length</code> が大きく、digest 値の違うスナップショットがあれば、<code>possibly_truncated</code> を <code>1</code> にし、別のアーカイブ版（<code>alt_archive_url</code>）を示します。採用するスナップショットは変えません。</li>
+      <li><code>possibly_truncated</code> は、CDX の <code>length</code>（圧縮後の WARC レコード長。PDF 本文の実サイズではありません）の比較からの推定です。意図した差し替えでファイルが小さくなった場合にも <code>1</code> になります。圧縮（gzip）されたままアーカイブされた版があるときも、その版の <code>length</code> がわずかに大きく出て、<code>1</code> になることがあります。jircas で確かめた、<code>length</code> の差が 2% 未満の 2 件は、どちらも別の版が gzip のままアーカイブされた同じ内容でした（そのうち 1 件を Chrome でダウンロードすると展開され、採用したアーカイブ版と同じ PDF になりました）。スナップショットが1件だけのものや、すべてのスナップショットが同じように切れているものは検出できません。</li>
+      <li>別のアーカイブ版は、比較したスナップショットのうち <code>length</code> がいちばん大きいものです。完全な版であることは保証しません。<code>--capture-before</code> を指定したときは、その日時より前のスナップショットからだけ選びます。指定の日時より後にしか <code>length</code> が大きいスナップショットが無いときは、<code>alt_archive_url</code> は空で、<code>larger_capture_date</code> だけが入ります。</li>
+      <li><code>single</code> は「比べられるスナップショットが1件だけ」という意味です。Wayback に1回しかアーカイブされていないとは限りません（status 200 以外の記録は数えていません）。</li>
+      <li><code>--capture-before</code> は、内容が変わる前のアーカイブ版を選びやすくする手段です。指定した日時より前のスナップショットの内容が正しいことは保証しません。日時は UTC で、指定した日時ちょうどのスナップショットは含みません。</li>
       <li><code>--capture-before</code> を指定すると、指定した日時より前のメタデータが無いアイテムは、ライセンスが <code>no_json</code> になります。実行ログに、<code>no_json</code> の理由ごとの件数を出します。</li>
     </ul>
   </section>
@@ -334,8 +334,8 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
     <h2>閲覧ページの設置</h2>
     <p>閲覧ページは、CSV を表示し、テキストボックスへの入力で絞り込む単体のページです。外部のライブラリは使いません。用途に応じて、次の2種類を使い分けます。ページのタイトルと説明文は、設置する機関に合わせて書き換えてください。</p>
     <ul>
-      <li><code>viewer_staff.html</code>（担当者向け）：すべての PDF へのリンクと、ライセンスの判定結果を表示します。「CC ライセンスのものだけを表示する」で絞り込めます。保存日の下に、digest の比較結果と、途中で切れている可能性の注意と、別の保存版へのリンクを表示します。</li>
-      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では、CC ライセンスのものだけを表示します。途中で切れている可能性がある PDF には、リンクの下に注意と別の保存版へのリンクを表示します。冒頭にあるサンプルの説明は書き換えてください。</li>
+      <li><code>viewer_staff.html</code>（担当者向け）：すべての PDF へのリンクと、ライセンスの判定結果を表示します。「CC ライセンスのものだけを表示する」で絞り込めます。アーカイブ日の下に、digest 値の比較結果と、途中で切れている可能性の注意と、別のアーカイブ版へのリンクを表示します。</li>
+      <li><code>docs/sample/viewer_public.html</code>（一般公開向け）：CC ライセンスを確認できた PDF だけにリンクを表示します。初期状態では、CC ライセンスのものだけを表示します。途中で切れている可能性がある PDF には、リンクの下に注意と別のアーカイブ版へのリンクを表示します。冒頭にあるサンプルの説明は書き換えてください。</li>
     </ul>
     <p>一般公開向けのページには、ライセンス情報を含む CSV（<code>--no-license</code> も <code>--no-bulk</code> も付けずに出力したもの）を使います。ライセンスの列が無いか空の CSV では、PDF へのリンクを1件も表示しません。</p>
     <ol>
@@ -349,15 +349,15 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
 
   <section id="extension">
     <h2>ブラウザ拡張機能</h2>
-    <p><code>extension/</code> は、<a href="https://irdb.nii.ac.jp/">IRDB</a> の詳細ページに、Wayback Machine の保存版へのリンクを表示する Chrome / Edge 用の拡張機能（Manifest V3）です。CSV を作らずに使えるので、登録件数が多く、CSV の作成に時間がかかる機関に向いています。表示は一般の利用者向けで、本文 PDF へのリンクは CC ライセンスの資料にだけ出します。</p>
+    <p><code>extension/</code> は、<a href="https://irdb.nii.ac.jp/">IRDB</a> の詳細ページに、Wayback Machine のアーカイブ版へのリンクを表示する Chrome / Edge 用の拡張機能（Manifest V3）です。CSV を作らずに使えるので、登録件数が多く、CSV の作成に時間がかかる機関に向いています。表示は一般の利用者向けで、本文 PDF へのリンクは CC ライセンスの資料にだけ出します。</p>
     <ul>
       <li>対象は、JAIRO Cloud の資料だけです。<code>*.repo.nii.ac.jp</code> のほか、独自ドメインで運用しているリポジトリ（<code>repository.naro.go.jp</code> など）も対象です。ほかのリポジトリの資料のページでは、何も表示しません。</li>
       <li>独自ドメインのリポジトリは、<code>extension/lib.js</code> の <code>CUSTOM_HOSTS</code> に一覧で持っています。一覧に無いリポジトリを対象にするときは、ホスト名を一覧に足してください。</li>
-      <li>ランディングページ（<code>/records/{id}</code>）の保存版へのリンクは、すべての資料に表示します。</li>
-      <li>本文 PDF の保存版へのリンクは、IRDB の「権利情報」に CC ライセンス（NC や ND の条件が付くものを含む）が書かれている資料にだけ表示します。ただし、公開日（Available）より前のファイルと、アクセスが制限されているファイルには表示しません。</li>
-      <li>リンクを表示する前に、Wayback Machine に保存状況を問い合わせます。保存を確認できたものだけをリンクにし、保存日を添えます。確認が終わるまでは項目名をリンクにせず、点の連続で通信中であることを示します。</li>
-      <li>問い合わせには、1件あたり数十秒かかることがあります。問い合わせに失敗したときは、最新の保存版へのリンクを表示します（開けない場合があります）。</li>
-      <li>最新の保存より <code>length</code> が大きく、digest の違う保存があるときは、保存版が途中で切れている可能性があるとして、本文 PDF のリンクの下に注意と、別の保存版（いちばん大きいもの）へのリンクを表示します。判定は CSV 出力ツールの <code>possibly_truncated</code> と同じです。</li>
+      <li>ランディングページ（<code>/records/{id}</code>）のアーカイブ版へのリンクは、すべての資料に表示します。</li>
+      <li>本文 PDF のアーカイブ版へのリンクは、IRDB の「権利情報」に CC ライセンス（NC や ND の条件が付くものを含む）が書かれている資料にだけ表示します。ただし、公開日（Available）より前のファイルと、アクセスが制限されているファイルには表示しません。</li>
+      <li>リンクを表示する前に、Wayback Machine にアーカイブ状況を問い合わせます。スナップショットを確認できたものだけをリンクにし、アーカイブ日を添えます。確認が終わるまでは項目名をリンクにせず、点の連続で通信中であることを示します。</li>
+      <li>問い合わせには、1件あたり数十秒かかることがあります。問い合わせに失敗したときは、最新のスナップショットへのリンクを表示します（開けない場合があります）。</li>
+      <li>最新のスナップショットより <code>length</code> が大きく、digest 値の違うスナップショットがあるときは、アーカイブ版が途中で切れている可能性があるとして、本文 PDF のリンクの下に注意と、別のアーカイブ版（いちばん大きいもの）へのリンクを表示します。判定は CSV 出力ツールの <code>possibly_truncated</code> と同じです。</li>
       <li>問い合わせの結果は、6時間ブラウザに保存します。</li>
     </ul>
 
