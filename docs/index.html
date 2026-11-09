@@ -242,6 +242,7 @@ footer p { margin: 0 0 4px; }
           <tr><td><code>--out</code></td><td>出力する CSV（既定: <code>wayback_fulltext.csv</code>）</td></tr>
           <tr><td><code>--bulk</code> / <code>--no-bulk</code></td><td><code>/record/</code> 配下を一括で分割取得して突き合わせる（既定）。<code>--no-bulk</code> ではアイテムごとに照会する</td></tr>
           <tr><td><code>--license</code> / <code>--no-license</code></td><td>Wayback に保存された各アイテムのメタデータ（WEKO3 の <code>export/json</code>）から、ライセンス情報を取得する（既定）。初回は数百件で数十分かかる。<code>--no-license</code> では取得せず、ライセンスの列を空にする。<code>--no-bulk</code> のときも取得しない</td></tr>
+          <tr><td><code>--capture-before DATE</code></td><td>採用する保存版の日時の上限（既定: 制限なし）。UTC で、この日時より前（未満）の保存版から最新のものを選ぶ。<code>YYYY-MM-DD</code>、<code>YYYYMMDD</code>、<code>YYYYMMDDhhmmss</code> で指定する。日付だけなら 00:00:00 UTC（日本時間 09:00）で、<code>2026-10-28</code> は「2026-10-28 00:00:00 UTC より前」。ライセンス判定に使うメタデータにも適用する</td></tr>
           <tr><td><code>--limit N</code></td><td>動作確認用に、先頭の N 件だけを処理する</td></tr>
           <tr><td><code>--refresh</code></td><td>IRDB の一覧を取り直す</td></tr>
           <tr><td><code>--cache-dir</code></td><td>キャッシュの保存先（既定: <code>.wb_cache</code>）</td></tr>
@@ -255,22 +256,24 @@ footer p { margin: 0 0 4px; }
     <ol>
       <li>IRDB の <a href="https://support.irdb.nii.ac.jp/ja/about/manual/opensearch">OpenSearch API</a> で、対象ホストのアイテムを列挙します。</li>
       <li>本文 URL を Wayback Machine の CDX API に照会します。</li>
-      <li>PDF ごとに、最新の保存を選びます。</li>
+      <li>PDF ごとに、最新の保存を選びます（<code>--capture-before</code> を指定したときは、その日時より前の保存のうち最新のもの）。あわせて、同じ PDF の保存どうしで内容の要約値（digest）を比べます。</li>
       <li>Wayback に保存された各アイテムのメタデータを取得し、権利情報とファイルのライセンス種別から、CC ライセンスかどうかを判定します（<code>--no-license</code> のときは行いません）。</li>
     </ol>
     <p>既定の <code>--bulk</code> は、アイテムごとに照会するかわりに <code>/record/</code> 配下をまとめて取得するので、通信回数が少なくて済みます。</p>
-    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
+    <p>中断しても、同じ <code>--cache-dir</code> で再実行すれば、取得済みの分を再利用します。キャッシュは、IRDB の検索条件とホストごとに分けて保存します。CDX のキャッシュには照会条件（取得する項目とフィルタ）も記録し、条件が違う古いキャッシュは削除して取り直します。digest の取得を加えたバージョンに更新した後の初回の実行では、CDX の照会をやり直します（<code>--bulk</code> なら数ページ分ですが、<code>--no-bulk</code> ではアイテムごとに照会し直すので、数百件で数時間かかります）。ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。図書館の担当者だけが使う場合は、<code>--no-license</code> を付けると、ライセンス情報の取得を省けます。</p>
     <p><code>WB_CONTACT</code> は User-Agent に付ける連絡先で、環境変数か <code>.env</code> で渡します。Wayback のレート制限は公表されていません。既定では1秒間隔で照会し、429 や 503 が返ったときは待ってから再試行します。CDX の応答には、1回あたり 20〜60 秒かかることがあります。</p>
     <h3>設定ファイル（<code>.env</code>）</h3>
     <p>オプションは、カレントディレクトリの <code>.env</code> に書いておけます。<code>.env.example</code> を <code>.env</code> という名前でコピーし、値を書き換えてください。<code>.env</code> に <code>WB_HOST</code> を書いておけば、<code>python wb_fulltext_csv.py</code> だけで実行できます。</p>
     <pre tabindex="0"><code>WB_HOST=jircas.repo.nii.ac.jp
 WB_CONTACT=連絡先メールアドレス
 WB_OUT=result.csv
-WB_LICENSE=false</code></pre>
+WB_LICENSE=false
+WB_CAPTURE_BEFORE=2026-10-28</code></pre>
     <ul>
       <li>キーは、オプション名を大文字にして <code>-</code> を <code>_</code> に置き換え、先頭に <code>WB_</code> を付けたものです（<code>--cache-dir</code> は <code>WB_CACHE_DIR</code>）。連絡先の <code>WB_CONTACT</code> も書けます。</li>
       <li><code>--limit</code> と <code>--refresh</code> は書けません。どちらも1回の実行だけで使う指定で、<code>.env</code> に書くと毎回効いてしまうためです。</li>
       <li><code>WB_BULK</code> と <code>WB_LICENSE</code> の値は、<code>true</code> か <code>false</code> です（<code>1</code> と <code>0</code>、<code>yes</code> と <code>no</code>、<code>on</code> と <code>off</code> も使えます）。</li>
+      <li><code>WB_CAPTURE_BEFORE</code> を空にする（<code>WB_CAPTURE_BEFORE=</code>）と、制限なしになります。環境変数やコマンドライン（<code>--capture-before ""</code>）の空文字でも、<code>.env</code> の値を打ち消せます。</li>
       <li>1行に1項目を書きます。<code>#</code> で始まる行はコメントです。行の途中からはコメントにできません。</li>
       <li>値は <code>"</code> か <code>'</code> で囲んでもかまいません。</li>
       <li>文字コードは UTF-8 です。BOM 付きでも読めます。</li>
@@ -286,25 +289,34 @@ WB_LICENSE=false</code></pre>
       <table>
         <thead><tr><th scope="col">列</th><th scope="col">内容</th></tr></thead>
         <tbody>
-          <tr><td class="wrap-first"><code>status</code></td><td><code>ok</code>（PDF の保存を確認）/ <code>no_capture</code>（保存なし）/ <code>no_pdf</code>（PDF 以外のみ、または無効な記録）/ <code>cdx_error</code>（照会に失敗）</td></tr>
+          <tr><td class="wrap-first"><code>status</code></td><td><code>ok</code>（PDF の保存を確認）/ <code>after_cutoff</code>（<code>--capture-before</code> の日時以降の保存しか無い。リンクは出さない）/ <code>no_capture</code>（保存なし）/ <code>no_pdf</code>（PDF 以外のみ、または無効な記録）/ <code>cdx_error</code>（照会に失敗）</td></tr>
           <tr><td class="wrap-first"><code>title</code>, <code>issn</code>, <code>publicationName</code>, <code>volume</code>, <code>number</code>, <code>startingPage</code>, <code>endingPage</code>, <code>publicationDate</code></td><td>IRDB のメタデータ</td></tr>
           <tr><td><code>updated</code></td><td>IRDB の更新日（個別の登録日ではありません）</td></tr>
           <tr><td class="wrap-first"><code>irdb_url</code>, <code>record_url</code>, <code>record_id</code></td><td>IRDB の詳細ページ、リポジトリの詳細ページ、レコード番号</td></tr>
           <tr><td><code>file_url</code></td><td>本文 PDF の元の URL</td></tr>
-          <tr><td class="wrap-first"><code>capture_timestamp</code>, <code>capture_date</code></td><td>最新の保存日時と日付</td></tr>
+          <tr><td class="wrap-first"><code>capture_timestamp</code>, <code>capture_date</code></td><td>採用した保存の日時と日付（<code>--capture-before</code> が無ければ最新の保存）</td></tr>
           <tr><td class="wrap-first"><code>mimetype</code>, <code>length</code></td><td>CDX の値（参考。PDF でも <code>mimetype</code> が <code>application/octet-stream</code> になることがあります）</td></tr>
-          <tr><td><code>n_captures</code></td><td>そのファイルの保存回数</td></tr>
-          <tr><td><code>item_files_captured</code></td><td>そのアイテムで保存を確認できた PDF の数</td></tr>
+          <tr><td><code>n_captures</code></td><td>そのファイルの保存回数（取得できた有効な保存の数。<code>--capture-before</code> の日時以降も含む）</td></tr>
+          <tr><td><code>item_files_captured</code></td><td>そのアイテムで保存を確認でき、採用できた PDF の数（<code>after_cutoff</code> のファイルは数えない）</td></tr>
           <tr><td><code>archive_url</code></td><td>Wayback Machine 上の PDF ファイルの URL（<code>…/web/{timestamp}id_/{original}</code>）</td></tr>
           <tr><td><code>license_status</code></td><td><code>--no-license</code> / <code>--no-bulk</code> のときは空。<code>cc</code>（CC ライセンス。NC や ND の条件が付くものも含む）/ <code>check</code>（要確認。権利情報とファイルのライセンス種別が食い違う）/ <code>not_cc</code>（権利情報はあるが CC ではない）/ <code>no_rights</code>（権利情報なし）/ <code>no_json</code>（メタデータを取得できない）</td></tr>
           <tr><td class="wrap-first"><code>license</code>, <code>rights</code>, <code>rights_uri</code>, <code>licensetype</code></td><td>判定した CC ライセンスの名前（例: <code>CC BY 4.0</code>）、権利情報の本文と URI、ファイルのライセンス種別（WEKO3 の値）</td></tr>
           <tr><td class="wrap-first"><code>license_capture_date</code>, <code>license_source_url</code></td><td>判定に使ったメタデータの保存日と、Wayback Machine 上の URL</td></tr>
+          <tr><td><code>capture_digest</code></td><td>採用した保存の digest（内容の要約値。欠けていれば空）</td></tr>
+          <tr><td><code>digest_variants</code></td><td>そのファイルの保存のうち、比べられる digest の種類の数</td></tr>
+          <tr><td><code>integrity_status</code></td><td>保存どうしの digest の比較結果。<code>consistent</code>（2回以上の保存がすべて同じ）/ <code>changed</code>（違う内容の保存がある）/ <code>single</code>（比べられる保存が1件だけ）/ <code>unknown</code>（digest の欠けた保存があり、判定できない。<code>cdx_error</code> の行も <code>unknown</code>）</td></tr>
+          <tr><td><code>digest_first_seen</code></td><td>採用した保存と同じ digest を最初に観測した日（この内容になった日とは限りません）</td></tr>
+          <tr><td><code>later_digest_date</code></td><td>採用した保存より後に、別の digest を最初に観測した日（変更が起きた日とは限りません）</td></tr>
         </tbody>
       </table>
     </div>
     <ul>
       <li>複数のファイルのうち一部だけが保存されている場合も、<code>ok</code> になります。ファイルの不足は検出できません。</li>
       <li><code>capture_date</code> は、Wayback が最後に保存した日です。その後にリポジトリ側でファイルが差し替えられていても、反映されていません。</li>
+      <li>digest の比較は、取得できた保存どうしで行います。<code>consistent</code> は「取得できた比較可能な保存がすべて同じ内容だった」という意味で、内容が正しいこと（真正性）は保証しません。<code>changed</code> も、正規の差し替えと改ざんを区別しません。</li>
+      <li><code>single</code> は「比べられる保存が1件だけ」という意味です。Wayback に1回しか保存されていないとは限りません（status 200 以外の記録は数えていません）。</li>
+      <li><code>--capture-before</code> は、改ざんの前の保存を選びやすくする手段です。指定した日時より前の保存が改ざんされていないことは保証しません。日時は UTC で、指定した日時ちょうどの保存は含みません。</li>
+      <li><code>--capture-before</code> を指定すると、指定した日時より前のメタデータが無いアイテムは、ライセンスが <code>no_json</code> になります。実行ログに、<code>no_json</code> の理由ごとの件数を出します。</li>
     </ul>
   </section>
 

@@ -49,6 +49,7 @@ WB_CONTACT="連絡先メールアドレス(任意)" python wb_fulltext_csv.py --
 | `--out` | 出力する CSV（既定: `wayback_fulltext.csv`） |
 | `--bulk` / `--no-bulk` | `/record/` 配下を一括で分割取得して突き合わせる（既定）。`--no-bulk` ではアイテムごとに照会する |
 | `--license` / `--no-license` | Wayback に保存された各アイテムのメタデータ（WEKO3 の `export/json`）から、ライセンス情報を取得する（既定）。初回は数百件で数十分かかる。`--no-license` では取得せず、ライセンスの列を空にする。`--no-bulk` のときも取得しない |
+| `--capture-before DATE` | 採用する保存版の日時の上限（既定: 制限なし）。UTC で、この日時より前（未満）の保存版から最新のものを選ぶ。`YYYY-MM-DD`、`YYYYMMDD`、`YYYYMMDDhhmmss` で指定する。日付だけなら 00:00:00 UTC（日本時間 09:00）で、`2026-10-28` は「2026-10-28 00:00:00 UTC より前」。ライセンス判定に使うメタデータにも適用する |
 | `--limit N` | 動作確認用に、先頭の N 件だけを処理する |
 | `--refresh` | IRDB の一覧を取り直す |
 | `--cache-dir` | キャッシュの保存先（既定: `.wb_cache`） |
@@ -59,13 +60,15 @@ WB_CONTACT="連絡先メールアドレス(任意)" python wb_fulltext_csv.py --
 
 1. IRDB の [OpenSearch API](https://support.irdb.nii.ac.jp/ja/about/manual/opensearch) で、対象ホストのアイテムを列挙します。
 2. 本文 URL を Wayback Machine の CDX API に照会します。
-3. PDF ごとに、最新の保存を選びます。
+3. PDF ごとに、最新の保存を選びます（`--capture-before` を指定したときは、その日時より前の保存のうち最新のもの）。あわせて、同じ PDF の保存どうしで内容の要約値（digest）を比べます。
 4. Wayback に保存された各アイテムのメタデータを取得し、権利情報とファイルのライセンス種別から、CC ライセンスかどうかを判定します（`--no-license` のときは行いません）。
 
 既定の `--bulk` は、アイテムごとに照会するかわりに `/record/` 配下をまとめて取得するので、通信回数が少なくて済みます。
 
 中断しても、同じ `--cache-dir` で再実行すれば、取得済みの分を再利用します。
 キャッシュは、IRDB の検索条件とホストごとに分けて保存します。
+CDX のキャッシュには照会条件（取得する項目とフィルタ）も記録し、条件が違う古いキャッシュは削除して取り直します。
+digest の取得を加えたバージョンに更新した後の初回の実行では、CDX の照会をやり直します（`--bulk` なら数ページ分ですが、`--no-bulk` ではアイテムごとに照会し直すので、数百件で数時間かかります）。
 ライセンス情報もキャッシュに残るので、2回目以降は、Wayback に新しい保存が現れたアイテムだけを取り直します。
 図書館の担当者だけが使う場合は、`--no-license` を付けると、ライセンス情報の取得を省けます。
 
@@ -91,11 +94,13 @@ WB_HOST=jircas.repo.nii.ac.jp
 WB_CONTACT=連絡先メールアドレス
 WB_OUT=result.csv
 WB_LICENSE=false
+WB_CAPTURE_BEFORE=2026-10-28
 ```
 
 - キーは、オプション名を大文字にして `-` を `_` に置き換え、先頭に `WB_` を付けたものです（`--cache-dir` は `WB_CACHE_DIR`）。連絡先の `WB_CONTACT` も書けます。
 - `--limit` と `--refresh` は書けません。どちらも1回の実行だけで使う指定で、`.env` に書くと毎回効いてしまうためです。
 - `WB_BULK` と `WB_LICENSE` の値は、`true` か `false` です（`1` と `0`、`yes` と `no`、`on` と `off` も使えます）。
+- `WB_CAPTURE_BEFORE` を空にする（`WB_CAPTURE_BEFORE=`）と、制限なしになります。環境変数やコマンドライン（`--capture-before ""`）の空文字でも、`.env` の値を打ち消せます。
 - 1行に1項目を書きます。`#` で始まる行はコメントです。行の途中からはコメントにできません。
 - 値は `"` か `'` で囲んでもかまいません。
 - 文字コードは UTF-8 です。BOM 付きでも読めます。
@@ -109,24 +114,33 @@ PDF ファイルごとに1行を出力します。
 
 | 列 | 内容 |
 | --- | --- |
-| `status` | `ok`（PDF の保存を確認）/ `no_capture`（保存なし）/ `no_pdf`（PDF 以外のみ、または無効な記録）/ `cdx_error`（照会に失敗） |
+| `status` | `ok`（PDF の保存を確認）/ `after_cutoff`（`--capture-before` の日時以降の保存しか無い。リンクは出さない）/ `no_capture`（保存なし）/ `no_pdf`（PDF 以外のみ、または無効な記録）/ `cdx_error`（照会に失敗） |
 | `title`, `issn`, `publicationName`, `volume`, `number`, `startingPage`, `endingPage`, `publicationDate` | IRDB のメタデータ |
 | `updated` | IRDB の更新日（個別の登録日ではありません） |
 | `irdb_url`, `record_url`, `record_id` | IRDB の詳細ページ、リポジトリの詳細ページ、レコード番号 |
 | `file_url` | 本文 PDF の元の URL |
-| `capture_timestamp`, `capture_date` | 最新の保存日時と日付 |
+| `capture_timestamp`, `capture_date` | 採用した保存の日時と日付（`--capture-before` が無ければ最新の保存） |
 | `mimetype`, `length` | CDX の値（参考。PDF でも `mimetype` が `application/octet-stream` になることがあります） |
-| `n_captures` | そのファイルの保存回数 |
-| `item_files_captured` | そのアイテムで保存を確認できた PDF の数 |
+| `n_captures` | そのファイルの保存回数（取得できた有効な保存の数。`--capture-before` の日時以降も含む） |
+| `item_files_captured` | そのアイテムで保存を確認でき、採用できた PDF の数（`after_cutoff` のファイルは数えない） |
 | `archive_url` | Wayback Machine 上の PDF ファイルの URL（`…/web/{timestamp}id_/{original}`） |
 | `license_status` | `--no-license` / `--no-bulk` のときは空。`cc`（CC ライセンス。NC や ND の条件が付くものも含む）/ `check`（要確認。権利情報とファイルのライセンス種別が食い違う）/ `not_cc`（権利情報はあるが CC ではない）/ `no_rights`（権利情報なし）/ `no_json`（メタデータを取得できない） |
 | `license`, `rights`, `rights_uri`, `licensetype` | 判定した CC ライセンスの名前（例: `CC BY 4.0`）、権利情報の本文と URI、ファイルのライセンス種別（WEKO3 の値） |
 | `license_capture_date`, `license_source_url` | 判定に使ったメタデータの保存日と、Wayback Machine 上の URL |
+| `capture_digest` | 採用した保存の digest（内容の要約値。欠けていれば空） |
+| `digest_variants` | そのファイルの保存のうち、比べられる digest の種類の数 |
+| `integrity_status` | 保存どうしの digest の比較結果。`consistent`（2回以上の保存がすべて同じ）/ `changed`（違う内容の保存がある）/ `single`（比べられる保存が1件だけ）/ `unknown`（digest の欠けた保存があり、判定できない。`cdx_error` の行も `unknown`） |
+| `digest_first_seen` | 採用した保存と同じ digest を最初に観測した日（この内容になった日とは限りません） |
+| `later_digest_date` | 採用した保存より後に、別の digest を最初に観測した日（変更が起きた日とは限りません） |
 
 ### 実行結果を読むときの注意
 
 - 複数のファイルのうち一部だけが保存されている場合も、`ok` になります。ファイルの不足は検出できません。
 - `capture_date` は、Wayback が最後に保存した日です。その後にリポジトリ側でファイルが差し替えられていても、反映されていません。
+- digest の比較は、取得できた保存どうしで行います。`consistent` は「取得できた比較可能な保存がすべて同じ内容だった」という意味で、内容が正しいこと（真正性）は保証しません。`changed` も、正規の差し替えと改ざんを区別しません。
+- `single` は「比べられる保存が1件だけ」という意味です。Wayback に1回しか保存されていないとは限りません（status 200 以外の記録は数えていません）。
+- `--capture-before` は、改ざんの前の保存を選びやすくする手段です。指定した日時より前の保存が改ざんされていないことは保証しません。日時は UTC で、指定した日時ちょうどの保存は含みません。
+- `--capture-before` を指定すると、指定した日時より前のメタデータが無いアイテムは、ライセンスが `no_json` になります。実行ログに、`no_json` の理由ごとの件数を出します。
 
 ## 閲覧ページの設置
 

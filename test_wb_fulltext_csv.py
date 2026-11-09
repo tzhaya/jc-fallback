@@ -294,7 +294,7 @@ def test_write_csv_roundtrip():
 def test_cdx_cache_skips_broken_tail():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "cdx.jsonl"
-        p.write_text(json.dumps({"host": "h", "rid": "1", "rows": []}) + "\n"
+        p.write_text(json.dumps({"host": "h", "rid": "1", "query": w.CDX_QUERY, "rows": []}) + "\n"
                      + '{"host": "h", "rid": "2", "ro', encoding="utf-8")
         cache = w.load_cdx_cache(p, "h")
         assert list(cache) == ["1"]
@@ -303,7 +303,8 @@ def test_cdx_cache_skips_broken_tail():
 def test_cdx_cache_is_separated_by_host():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "cdx.jsonl"
-        lines = [{"host": "a.example", "rid": "1", "rows": [_cap("20250101000000", "a.pdf")]},
+        lines = [{"host": "a.example", "rid": "1", "query": w.CDX_QUERY,
+                  "rows": [_cap("20250101000000", "a.pdf")]},
                  {"rid": "2", "rows": []}]  # host 欄の無い旧形式
         p.write_text("".join(json.dumps(o) + "\n" for o in lines), encoding="utf-8")
         assert list(w.load_cdx_cache(p, "a.example")) == ["1"]
@@ -355,20 +356,20 @@ def test_fetch_bulk_resume_after_broken_tail_keeps_new_page():
 def test_cdx_cache_append_after_broken_tail_is_readable():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "cdx.jsonl"
-        p.write_text(json.dumps({"host": "h", "rid": "1", "rows": []}) + "\n"
+        p.write_text(json.dumps({"host": "h", "rid": "1", "query": w.CDX_QUERY, "rows": []}) + "\n"
                      + '{"host": "h", "rid": "2", "ro', encoding="utf-8")
         w.repair_jsonl_tail(p)
         with p.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"host": "h", "rid": "3", "rows": []}) + "\n")
+            f.write(json.dumps({"host": "h", "rid": "3", "query": w.CDX_QUERY, "rows": []}) + "\n")
         assert list(w.load_cdx_cache(p, "h")) == ["1", "3"]
 
 
 def test_resume_after_cut_in_middle_of_multibyte_char():
     # 日本語ファイル名の UTF-8 の途中で書き込みが途切れても、修復→読み込みで復旧できる
     h = "h"
-    good = json.dumps({"host": h, "rid": "1", "rows": []}, ensure_ascii=False) + "\n"
-    broken = json.dumps({"host": h, "rid": "2", "rows": [{"original": "x/日本語.pdf"}]},
-                        ensure_ascii=False).encode("utf-8")
+    good = json.dumps({"host": h, "rid": "1", "query": w.CDX_QUERY, "rows": []}, ensure_ascii=False) + "\n"
+    broken = json.dumps({"host": h, "rid": "2", "query": w.CDX_QUERY,
+                         "rows": [{"original": "x/日本語.pdf"}]}, ensure_ascii=False).encode("utf-8")
     cut = broken.index("本".encode("utf-8")) + 1  # 「本」の 1 バイト目だけ
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "cdx.jsonl"
@@ -836,6 +837,267 @@ def test_no_license_leaves_license_columns_empty():
     for k in ("license_status", "license", "rights", "rights_uri", "licensetype",
               "license_capture_date", "license_source_url"):
         assert k in got[0] and got[0][k] == "", k
+
+
+# ---------------------------------------------------------------------------
+# 保存履歴の digest と --capture-before（Issue #5）
+# ---------------------------------------------------------------------------
+
+# 形式が正しい 32 文字の Base32（実測値。A は 2000258、B は 2000885 の digest）
+DIG_A = "LIMIPSTYP2V6M7NO6TR4S42OIEP7QPKP"
+DIG_B = "VVFNXLLVFCO7OEK53VKCEKDYGBPX27VQ"
+
+
+def _dcap(ts, digest, name="a.pdf", rid="1", scheme="https", **kw):
+    return {"timestamp": ts, "original": f"{scheme}://h/record/{rid}/files/{name}",
+            "mimetype": "application/octet-stream", "statuscode": "200", "length": "100",
+            "digest": digest, **kw}
+
+
+def _one(rows, before=""):
+    files = w.summarize_pdf_files(rows, before)
+    assert len(files) == 1, files
+    return files[0]
+
+
+def test_parse_capture_before():
+    assert w.parse_capture_before("2026-10-28") == "20261028000000"
+    assert w.parse_capture_before("20261028") == "20261028000000"
+    assert w.parse_capture_before(" 20261028123456 ") == "20261028123456"
+    assert w.parse_capture_before("") == "" and w.parse_capture_before(None) == ""
+    for bad in ("2026/10/28", "2026-1-2", "202610281234", "2026-02-30", "20261028250000", "x"):
+        try:
+            w.parse_capture_before(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} で ValueError にならない")
+    assert w.describe_before("20261028000000") == (
+        "2026-10-28 00:00:00 UTC（日本時間 2026-10-28 09:00:00）より前")
+
+
+def test_normalize_digest():
+    assert w.normalize_digest(DIG_A) == DIG_A
+    assert w.normalize_digest(" " + DIG_A.lower() + " ") == DIG_A
+    for prefix in ("sha1:", "SHA1:", "Sha1:"):
+        assert w.normalize_digest(prefix + DIG_A) == DIG_A
+    for bad in (None, "", "-", DIG_A[:31], DIG_A + "A", "0" * 32, "1" * 32, DIG_A[:31] + "8"):
+        assert w.normalize_digest(bad) == "", bad
+
+
+def test_integrity_status_priority():
+    assert w.integrity_status([DIG_A, DIG_B, ""]) == "changed"  # 欠損があっても違いを示す
+    assert w.integrity_status([DIG_A, ""]) == "unknown"          # 一致とはしない
+    assert w.integrity_status([DIG_A, DIG_A, ""]) == "unknown"
+    assert w.integrity_status([DIG_A, DIG_A]) == "consistent"
+    assert w.integrity_status([DIG_A]) == "single"
+    assert w.integrity_status([""]) == "unknown"
+
+
+def test_digest_columns_consistent_and_changed():
+    f = _one([_dcap("20250101000000", DIG_A), _dcap("20250601000000", "sha1:" + DIG_A)])
+    assert f["integrity_status"] == "consistent" and f["digest_variants"] == 1
+    assert f["capture_digest"] == DIG_A and f["digest_first_seen"] == "2025-01-01"
+    assert f["later_digest_date"] == ""
+    # 上限より後でだけ内容が変わる。比較は全期間、採用は上限より前
+    rows = [_dcap("20250101000000", DIG_A), _dcap("20260201000000", DIG_A),
+            _dcap("20261101000000", DIG_B), _dcap("20261201000000", DIG_B)]
+    f = _one(rows, "20261028000000")
+    assert f["adopted"]["timestamp"] == "20260201000000"
+    assert f["integrity_status"] == "changed" and f["digest_variants"] == 2
+    assert f["n_captures"] == 4  # 全期間の数
+    assert f["capture_digest"] == DIG_A and f["digest_first_seen"] == "2025-01-01"
+    assert f["later_digest_date"] == "2026-11-01"
+    # 上限なしなら最新（B）を採用し、その後に別の digest は無い
+    f = _one(rows)
+    assert f["capture_digest"] == DIG_B and f["digest_first_seen"] == "2026-11-01"
+    assert f["later_digest_date"] == ""
+
+
+def test_digest_dates_when_digest_is_missing():
+    # 採用版の digest が欠損し、後続に A と B がある → changed だが、日付の 2 列は空
+    rows = [_dcap("20250101000000", "-"), _dcap("20261101000000", DIG_A),
+            _dcap("20261201000000", DIG_B)]
+    f = _one(rows, "20261028000000")
+    assert f["integrity_status"] == "changed" and f["digest_variants"] == 2
+    assert f["capture_digest"] == "" and f["digest_first_seen"] == "" and f["later_digest_date"] == ""
+    # 採用版が A で、後続は欠損だけ → 欠損は「別の digest」と数えない
+    rows = [_dcap("20250101000000", DIG_A), _dcap("20261101000000", "")]
+    f = _one(rows, "20261028000000")
+    assert f["integrity_status"] == "unknown" and f["digest_variants"] == 1
+    assert f["capture_digest"] == DIG_A and f["later_digest_date"] == ""
+    # digest の列が無い旧形式の行
+    f = _one([{k: v for k, v in _dcap("20250101000000", DIG_A).items() if k != "digest"}])
+    assert f["integrity_status"] == "unknown" and f["digest_variants"] == 0
+
+
+def test_capture_before_boundary_is_exclusive_utc():
+    rows = [_dcap("20261027235959", DIG_A), _dcap("20261028000000", DIG_A)]
+    f = _one(rows, w.parse_capture_before("2026-10-28"))
+    assert f["adopted"]["timestamp"] == "20261027235959"  # 指定日の 00:00:00 UTC は含まない
+    assert f["integrity_status"] == "consistent" and f["n_captures"] == 2
+    picked = w.pick_latest_pdfs(rows, "20261028000000")
+    assert [p["timestamp"] for p in picked] == ["20261027235959"] and picked[0]["n_captures"] == 2
+    assert w.pick_latest_pdfs(rows, "20261027235959") == []  # 上限より前に無いファイルは除く
+
+
+def test_digest_comparison_ignores_invalid_length_and_revisit_and_scheme():
+    rows = [
+        _dcap("20250101000000", DIG_A, scheme="http"),
+        _dcap("20250601000000", DIG_A, scheme="https"),           # http と https は同じファイル
+        _dcap("20250930000000", DIG_B, length="-10490845558"),    # length が負: 比較に使わない
+        {**_dcap("20251001000000", DIG_B), "mimetype": "warc/revisit", "statuscode": "-"},  # revisit
+    ]
+    f = _one(rows)
+    assert f["n_captures"] == 2 and f["integrity_status"] == "consistent"
+    assert f["adopted"]["timestamp"] == "20250601000000"
+
+
+def test_after_cutoff_rows_and_item_files_captured():
+    _, entries = w.parse_atom(ATOM_FIXTURE)
+    before = "20261028000000"
+    rows = w.build_rows(entries[0], "1", [
+        _dcap("20250101000000", DIG_A, "a.pdf"), _dcap("20261101000000", DIG_A, "a.pdf"),
+        _dcap("20261101000000", DIG_B, "b.pdf")], before)
+    a, b = rows
+    assert a["status"] == "ok" and b["status"] == "after_cutoff"
+    assert a["item_files_captured"] == 1 and b["item_files_captured"] == 1
+    assert b["file_url"].endswith("/b.pdf") and b["n_captures"] == 1
+    assert b["digest_variants"] == 1 and b["integrity_status"] == "single"
+    for k in ("capture_timestamp", "capture_date", "mimetype", "length", "capture_digest",
+              "digest_first_seen", "later_digest_date", "archive_url"):
+        assert not b.get(k), k  # 採用版に依存する列は空
+    assert a["archive_url"].startswith("https://web.archive.org/web/20250101000000id_/")
+    assert a["capture_digest"] == DIG_A and a["integrity_status"] == "consistent"
+    only_after = w.build_rows(entries[0], "2", [_dcap("20261101000000", DIG_B, "b.pdf", "2")], before)
+    assert [r["status"] for r in only_after] == ["after_cutoff"]
+    assert only_after[0]["item_files_captured"] == 0
+    # アイテム単位: ok > after_cutoff
+    by_status, pdf_files = w.summarize(rows + only_after + w.build_rows(entries[0], "3", []))
+    assert by_status == {"ok": 1, "after_cutoff": 1, "no_capture": 1} and pdf_files == 1
+    # 上限なしなら after_cutoff は現れない
+    assert all(r["status"] == "ok" for r in w.build_rows(entries[0], "2",
+                                                         [_dcap("20261101000000", DIG_B, "b.pdf", "2")]))
+
+
+def test_summarize_integrity():
+    rows = [{"status": "ok", "integrity_status": "consistent"},
+            {"status": "ok", "integrity_status": "changed", "later_digest_date": "2026-11-01"},
+            {"status": "ok", "integrity_status": "changed"},
+            {"status": "after_cutoff", "integrity_status": "single"},
+            {"status": "ok", "integrity_status": ""},
+            {"status": "no_capture"}, {"status": "cdx_error", "integrity_status": "unknown"}]
+    by, later = w.summarize_integrity(rows)
+    assert by == {"consistent": 1, "changed": 2, "single": 1, "unknown": 1} and later == 1
+
+
+def test_digest_columns_are_appended_at_end():
+    cols = w.CSV_COLUMNS
+    assert cols[-5:] == ["capture_digest", "digest_variants", "integrity_status",
+                         "digest_first_seen", "later_digest_date"]
+    assert cols.index("license_source_url") == len(cols) - 6  # 既存の列の位置は変わらない
+    assert "digest" in w.CDX_FIELDS and w.CDX_QUERY["filter"] == "statuscode:200"
+
+
+def test_stale_cdx_cache_lines_are_dropped_and_refetched():
+    with tempfile.TemporaryDirectory() as d:
+        cache = Path(d) / "cdx_bulk.jsonl"
+        h = "jircas.repo.nii.ac.jp"
+        old_rows = w.parse_cdx_page(BULK_PAGE2)[0]
+        lines = [
+            {"host": h, "kind": "record", "rows": old_rows, "resume": None},  # 旧形式（query なし）
+            {"host": h, "kind": "record", "rows": old_rows, "resume": None,
+             "query": {"fl": w.CDX_FIELDS, "filter": "statuscode:301"}},    # 条件が違う
+        ]
+        cache.write_text("".join(json.dumps(o) + "\n" for o in lines), encoding="utf-8")
+        assert w.load_bulk_cache(cache, h) == {}  # どちらも使わない
+        http = _FakeHttp([BULK_PAGE1, BULK_PAGE2])
+        rows = w.fetch_bulk(http, h, cache, page_size=2)
+        assert len(http.urls) == 2 and len(rows) == 3  # 取り直す
+        assert "digest" in http.urls[0]  # fl に digest を含める
+        kept = [json.loads(x) for x in cache.read_text(encoding="utf-8").splitlines()]
+        assert len(kept) == 2 and all(o["query"] == w.CDX_QUERY for o in kept)  # 古い行は消える
+        http2 = _FakeHttp([])
+        assert len(w.fetch_bulk(http2, h, cache)) == 3 and not http2.urls
+        assert w.drop_stale_cache_lines(cache) == 0
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "cdx.jsonl"
+        p.write_text(json.dumps({"host": "h", "rid": "1", "rows": []}) + "\n"
+                     + json.dumps({"host": "h", "rid": "2", "query": w.CDX_QUERY, "rows": []}) + "\n",
+                     encoding="utf-8")
+        assert list(w.load_cdx_cache(p, "h")) == ["2"]
+        assert w.drop_stale_cache_lines(p) == 1 and list(w.load_cdx_cache(p, "h")) == ["2"]
+
+
+EXPORT_ORIG = "https://h/records/1/export/json"
+_CC_INFO = {"rights": [{"text": "", "uri": "https://creativecommons.org/licenses/by/4.0/"}],
+            "files": []}
+
+
+def test_collect_licenses_does_not_reuse_cache_after_cutoff():
+    # 計画レビュー P1 の回帰テスト: 上限なしで取得済み → 上限を付けて再実行 → 通信失敗
+    before = "20261028000000"
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "export_json.jsonl"
+        p.write_text(json.dumps({"host": "h", "rid": "1", "latest": "20261101000000",
+                                 "timestamp": "20261101000000", "original": EXPORT_ORIG,
+                                 "info": _CC_INFO}) + "\n", encoding="utf-8")
+        all_caps = {"1": [{"timestamp": "20261101000000", "original": EXPORT_ORIG},
+                          {"timestamp": "20261001000000", "original": EXPORT_ORIG}]}
+        caps = {"1": all_caps["1"][1:]}
+        http = _UrlHttp({w.archive_url("20261001000000", EXPORT_ORIG): TimeoutError()})
+        got, err = w.collect_licenses(http, "h", ["1"], caps, p, before)
+        assert err == 1 and got == {}
+        rows = w.add_license_columns([{"file_url": ""}], got.get("1"))
+        assert rows[0]["license_status"] == "no_json"
+        assert w.license_missing_reasons(["1"], all_caps, caps, got) == {"fetch_failed": 1}
+        # 上限なしなら、従来どおり古いキャッシュを使う
+        got, err = w.collect_licenses(http, "h", ["1"], all_caps, p)
+        assert got["1"]["timestamp"] == "20261101000000"
+        # 取り直しに成功すれば、上限より前の export JSON で判定する
+        http = _UrlHttp({w.archive_url("20261001000000", EXPORT_ORIG): json.dumps(EXPORT_JIRCAS)})
+        got, err = w.collect_licenses(http, "h", ["1"], caps, p, before)
+        assert err == 0 and got["1"]["timestamp"] == "20261001000000"
+
+
+def test_no_export_json_before_cutoff():
+    # 上限より前に export JSON が 1 件も無い → 候補の辞書に入らず、no_json
+    rows = [{"timestamp": "20261101000000", "original": EXPORT_ORIG, "statuscode": "200",
+             "length": "100"}]
+    all_caps = w.group_export_json(rows)
+    caps = w.group_export_json(rows, "20261028000000")
+    assert list(all_caps) == ["1"] and caps == {}
+    with tempfile.TemporaryDirectory() as d:
+        http = _UrlHttp({})
+        got, err = w.collect_licenses(http, "h", ["1", "2"], caps, Path(d) / "e.jsonl",
+                                      "20261028000000")
+        assert got == {} and err == 0 and http.calls == []
+    reasons = w.license_missing_reasons(["1", "2"], all_caps, caps, got)
+    assert reasons == {"none_before": 1, "no_export": 1}
+    # 試したがすべて読めなかったもの（info が null で、最新の候補まで処理済み）
+    lic = {"1": {"latest": "20261101000000", "info": None}}
+    assert w.license_missing_reasons(["1"], all_caps, all_caps, lic) == {"unreadable": 1}
+    # 判定できたものは数えない
+    lic = {"1": {"latest": "20261101000000", "timestamp": "20261101000000", "info": _CC_INFO}}
+    assert w.license_missing_reasons(["1"], all_caps, all_caps, lic) == {}
+
+
+def test_capture_before_option_precedence():
+    a = _opts(["--host", "h"])
+    assert a.capture_before == ""  # 既定は制限なし
+    a = _opts(["--host", "h"], {}, "WB_CAPTURE_BEFORE=2026-10-28\n")
+    assert a.capture_before == "20261028000000"
+    a = _opts(["--host", "h"], {"WB_CAPTURE_BEFORE": "20261001"}, "WB_CAPTURE_BEFORE=2026-10-28\n")
+    assert a.capture_before == "20261001000000"  # 環境変数 > .env
+    a = _opts(["--host", "h", "--capture-before", "2026-09-01"], {"WB_CAPTURE_BEFORE": "20261001"})
+    assert a.capture_before == "20260901000000"  # CLI > 環境変数
+    a = _opts(["--host", "h", "--capture-before", ""], {}, "WB_CAPTURE_BEFORE=2026-10-28\n")
+    assert a.capture_before == ""  # CLI の空文字で .env を打ち消す
+    a = _opts(["--host", "h"], {"WB_CAPTURE_BEFORE": ""}, "WB_CAPTURE_BEFORE=2026-10-28\n")
+    assert a.capture_before == ""  # 環境変数の空文字でも打ち消す
+    a = _opts(["--host", "h", "--capture-before", "2026-10-28"], {}, "WB_CAPTURE_BEFORE=bad\n")
+    assert a.capture_before == "20261028000000"  # 下位の不正値は CLI で上書きできる
+    assert _exits(lambda: _opts(["--host", "h", "--capture-before", "2026/10/28"])) == 2
+    assert _exits(lambda: _opts(["--host", "h"], {}, "WB_CAPTURE_BEFORE=bad\n")) == 2
 
 
 def _run_all():

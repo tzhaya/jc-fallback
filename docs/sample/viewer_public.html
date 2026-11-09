@@ -175,6 +175,12 @@ td.links a + a { margin-top: 4px; }
 .label.no_capture { color: var(--gray-800); }
 .label.no_pdf { color: var(--orange-800); }
 .label.cdx_error { color: var(--red-900); }
+.label.after_cutoff { color: var(--orange-800); }
+.label.int-consistent { color: var(--green-800); }
+.label.int-changed { color: var(--red-900); }
+.label.int-single, .label.int-unknown { color: var(--gray-800); }
+td.capture { white-space: nowrap; }
+td.capture .note { display: block; margin-top: 4px; max-width: 14em; font-size: 14px; line-height: 1.6; color: var(--gray-800); white-space: normal; }
 .label.lic-cc { color: var(--green-800); }
 .label.lic-check { color: var(--orange-800); }
 .label.lic-other { color: var(--gray-800); }
@@ -266,6 +272,7 @@ footer p { margin: 0 0 4px; }
     <p>PDF は、表示されている CC ライセンスの条件（クレジットの表示、非営利、改変禁止など）に従って利用してください。正確なライセンスは、IRDB または提供機関で確認してください。</p>
     <p>PDF へのリンクは Internet Archive の Wayback Machine 上のファイルです。Internet Archive の利用条件にも従ってください。</p>
     <p>「取得可」は、Wayback Machine に PDF の保存を確認できたことを示します。複数ファイルのうち一部だけが保存されている場合は区別できません。</p>
+    <p>「基準日時以降のみ」は、データの作成時に指定した日時より後の保存しか無く、リンクを出していない PDF です。</p>
     <p>ライセンスは、Wayback Machine に保存されたリポジトリのメタデータ（権利情報と、ファイルごとのライセンス種別）から判定しています。保存されたメタデータが古い場合や、保存されていない場合があります。「要確認」は、2つの情報が食い違うものです。</p>
     <p>表示されているメタデータとリンクはデータ取得時点のものです。変更されている場合があります。</p>
   </div>
@@ -280,7 +287,8 @@ footer p { margin: 0 0 4px; }
     ok: "取得可",
     no_capture: "未保存",
     no_pdf: "PDFなし",
-    cdx_error: "照会エラー"
+    cdx_error: "照会エラー",
+    after_cutoff: "基準日時以降のみ"
   };
 
   /* 一般公開用は true。CC ライセンスを確認できた PDF だけに Wayback へのリンクを出す */
@@ -290,6 +298,13 @@ footer p { margin: 0 0 4px; }
     not_cc: "CC以外",
     no_rights: "権利情報なし",
     no_json: "未確認"
+  };
+  /* 保存履歴の digest の比較（担当者向けだけに表示する） */
+  var INTEGRITY_LABELS = {
+    consistent: "履歴で一致",
+    changed: "変更あり",
+    single: "履歴不足",
+    unknown: "判定不能"
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -359,6 +374,7 @@ footer p { margin: 0 0 4px; }
       var parts = Object.keys(o).map(function (k) { return o[k]; });
       parts.push(LABELS[o.status] || "");
       parts.push(LICENSE_LABELS[o.license_status] || "");
+      if (!PUBLIC) parts.push(INTEGRITY_LABELS[o.integrity_status] || "");
       return { row: o, haystack: normalize(parts.join("\n")) };
     });
     els.q.disabled = false;
@@ -432,7 +448,7 @@ footer p { margin: 0 0 4px; }
     tr.appendChild(td("num", o.publicationDate));
     tr.appendChild(td("num", o.record_id));
     tr.appendChild(td("license", licenseCell(o)));
-    tr.appendChild(td("num", o.capture_date));
+    tr.appendChild(td("capture", captureCell(o)));
 
     var isCc = o.license_status === "cc";
     var links = document.createElement("div");
@@ -451,6 +467,32 @@ footer p { margin: 0 0 4px; }
     });
     tr.appendChild(td("links", links));
     return tr;
+  }
+
+  /* 保存日と、担当者向けには保存履歴の比較結果。新しい列の無い旧 CSV では保存日だけを出す */
+  function captureCell(o) {
+    var box = document.createElement("div");
+    box.appendChild(document.createTextNode(o.capture_date || ""));
+    if (PUBLIC || !INTEGRITY_LABELS[o.integrity_status]) return box;
+    var wrap = document.createElement("div");
+    var label = document.createElement("span");
+    label.className = "label int-" + o.integrity_status;
+    label.textContent = INTEGRITY_LABELS[o.integrity_status];
+    wrap.appendChild(label);
+    box.appendChild(wrap);
+    function note(text) {
+      var n = document.createElement("span");
+      n.className = "note";
+      n.textContent = text;
+      box.appendChild(n);
+    }
+    if (o.later_digest_date) {
+      note("この保存版より後に、別の内容の保存を確認（" + o.later_digest_date + "）");
+    }
+    if (o.digest_first_seen && o.digest_first_seen !== o.capture_date) {
+      note("同じ内容の最初の保存: " + o.digest_first_seen);
+    }
+    return box;
   }
 
   function licenseCell(o) {

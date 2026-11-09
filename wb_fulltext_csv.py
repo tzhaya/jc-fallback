@@ -6,7 +6,7 @@ Wayback Machine 上の最新アーカイブ URL を CSV に出力する（標準
   1. IRDB OpenSearch (fulltext=1, Atom) で全件取得し、URI のホストで自機関分に絞る
   2. URI からレコード番号を取り出す（本文 URL のファイル名は IRDB に無いため）
   3. Wayback CDX にレコード番号配下 (/record/{id}/files/) を
-     プレフィックス照会し、PDF ファイルごとに最新の capture を選ぶ
+     プレフィックス照会し、PDF ファイルごとに最新の capture を選ぶ（--capture-before で日時の上限）
   4. 結果を CSV に出力する（ダウンロードは担当者が手元で行う）
 
 注意:
@@ -31,7 +31,16 @@ WB_HOST=jircas.repo.nii.ac.jp のように書いておける（キーは WB_ + �
 - を _ にしたもの。真偽は true/false。UTF-8、BOM 付きも可）。--env-file で別のファイルを指定できる。
 優先順はコマンドライン > 環境変数 > .env > 既定値。書き方は .env.example を参照。
 中断しても、同じ --cache-dir で再実行すれば取得済みの分は再利用される。
-キャッシュは検索条件（IRDB 一覧）とホスト（CDX）ごとに識別され、条件が違えば再利用しない。
+キャッシュは検索条件（IRDB 一覧）とホスト・照会条件（CDX）ごとに識別され、条件が違えば再利用しない。
+
+保存履歴の digest（Issue #5）:
+  CDX の digest を、同じ本文 URL の capture どうしで比べ、integrity_status（consistent / changed /
+  single / unknown）を CSV に出す。比べるのは取得済みの比較可能な履歴だけで、digest の一致は
+  真正性を保証しない。正規の差し替えと改ざんも区別できない。
+  --capture-before 2026-10-28 のように指定すると、UTC でその日時より前（未満）の保存版から
+  最新のものを採用する（日付だけなら 00:00:00 UTC = 日本時間 09:00）。上限より後にしか保存が無い
+  ファイルは status=after_cutoff になる。ライセンス判定に使う export JSON にも同じ上限を適用する。
+  上限の指定はリスクを下げる手段であり、安全を保証しない。
 """
 
 from __future__ import annotations
@@ -48,7 +57,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -58,7 +67,11 @@ PRISM = "{http://prismstandard.org/namespaces/basic/2.0/}"
 
 IRDB_OPENSEARCH = "https://irdb.nii.ac.jp/opensearch/search"
 CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
-CDX_FIELDS = ["timestamp", "original", "mimetype", "statuscode", "length"]
+CDX_FIELDS = ["timestamp", "original", "mimetype", "statuscode", "length", "digest"]
+CDX_FILTER = "statuscode:200"
+# キャッシュ（cdx_bulk.jsonl、cdx.jsonl）の各行に書く照会条件。現在の条件と違う行（条件の無い旧形式を
+# 含む）は使わない。取得項目やフィルタを変えたら、キャッシュは自動で取り直しになる。
+CDX_QUERY = {"fl": CDX_FIELDS, "filter": CDX_FILTER}
 # 本文ファイル URL は /record/{id}/files/ 固定とする（暫定）。詳細ページは /records/{id} だが、
 # ファイルは常に単一の保存先を指すため複数表記を照会する必要性は低いと判断した。
 PATH_KINDS = ("record",)
@@ -73,6 +86,9 @@ CSV_COLUMNS = [
     "n_captures", "item_files_captured", "archive_url",
     *("license_status", "license", "rights", "rights_uri", "licensetype",
       "license_capture_date", "license_source_url"),
+    # 保存履歴の digest の比較（Issue #5）。既存の列の位置を変えないよう末尾に足す
+    *("capture_digest", "digest_variants", "integrity_status", "digest_first_seen",
+      "later_digest_date"),
 ]
 
 # WEKO3 のファイル情報の licensetype のうち CC のもの（NC/ND 付きも CC として扱う）。
@@ -196,11 +212,47 @@ def has_valid_length(r: dict) -> bool:
         return False
 
 
-def pick_latest_pdfs(rows: Iterable[dict]) -> List[dict]:
-    """status 200 の PDF capture を、ファイルごとに最新の 1 件へ絞る。
+_DIGEST_RE = re.compile(r"[A-Z2-7]{32}")
 
-    返す各行に `n_captures`（そのファイルの 200 の capture 総数）を付ける。
-    length が不正な capture は無効として除く。
+
+def normalize_digest(v: object) -> str:
+    """CDX の digest を比較できる形にする。比較できない値（欠損）は空文字を返す。
+
+    前後の空白を除き、先頭の `sha1:` を大文字小文字を区別せずに除いてから英大文字にする。
+    32 文字の Base32（A-Z、2-7）だけを比較可能とし、None、空文字、`-`、それ以外の形式は欠損とする。
+    """
+    s = str(v or "").strip()
+    if s[:5].lower() == "sha1:":
+        s = s[5:].strip()
+    s = s.upper()
+    return s if _DIGEST_RE.fullmatch(s) else ""
+
+
+def integrity_status(digests: List[str]) -> str:
+    """1 ファイルの全期間の capture の digest（正規化済み。欠損は空）から判定する。
+
+    優先順: 比較可能な digest が 2 種類以上なら changed（一部が欠損でも、確認できた違いを示す）。
+    変更を確認できず、欠損があれば unknown。全部揃い、2 回以上で 1 種類なら consistent。
+    全部揃い、1 回だけなら single（比較対象として取得できた有効な capture が 1 件という意味）。
+    """
+    variants = {d for d in digests if d}
+    if len(variants) >= 2:
+        return "changed"
+    if any(not d for d in digests):
+        return "unknown"
+    return "consistent" if len(digests) >= 2 else "single"
+
+
+def summarize_pdf_files(rows: Iterable[dict], before: str = "") -> List[dict]:
+    """status 200 で length が正の PDF capture を、ファイルごとにまとめる。
+
+    `before`（14 桁の UTC timestamp。空なら制限なし）より前の capture のうち最新を採用する
+    （`adopted`。上限より前に無ければ None）。digest の比較と `n_captures` は、上限より後も含む
+    取得済みの全期間の capture で行う（上限より後の変化こそ知りたい情報のため）。
+
+    返す各要素: original（採用版の URL。無ければ最新の capture の URL）, adopted, n_captures,
+    digest_variants, integrity_status, capture_digest, digest_first_seen, later_digest_date。
+    日付の 2 列は、採用版の digest が欠損なら空。後続の欠損 digest は「別の digest」と数えない。
     """
     groups: Dict[Tuple[str, str], List[dict]] = {}
     for r in rows:
@@ -211,9 +263,37 @@ def pick_latest_pdfs(rows: Iterable[dict]) -> List[dict]:
         groups.setdefault(file_key(r["original"]), []).append(r)
     out = []
     for _, caps in sorted(groups.items()):
-        latest = max(caps, key=lambda r: r["timestamp"])
-        out.append({**latest, "n_captures": len(caps)})
+        digests = [normalize_digest(c.get("digest")) for c in caps]
+        eligible = [c for c in caps if not before or c["timestamp"] < before]
+        adopted = max(eligible, key=lambda r: r["timestamp"]) if eligible else None
+        ad = normalize_digest(adopted.get("digest")) if adopted else ""
+        first_seen = later = ""
+        if ad:
+            first_seen = capture_date(min(c["timestamp"] for c, d in zip(caps, digests) if d == ad))
+            diff = [c["timestamp"] for c, d in zip(caps, digests)
+                    if d and d != ad and c["timestamp"] > adopted["timestamp"]]
+            later = capture_date(min(diff)) if diff else ""
+        out.append({
+            "original": (adopted or max(caps, key=lambda r: r["timestamp"]))["original"],
+            "adopted": adopted,
+            "n_captures": len(caps),
+            "digest_variants": len({d for d in digests if d}),
+            "integrity_status": integrity_status(digests),
+            "capture_digest": ad,
+            "digest_first_seen": first_seen,
+            "later_digest_date": later,
+        })
     return out
+
+
+def pick_latest_pdfs(rows: Iterable[dict], before: str = "") -> List[dict]:
+    """status 200 の PDF capture を、ファイルごとに採用する 1 件へ絞る（上限より前に無いファイルは除く）。
+
+    返す各行は、採用した capture に `n_captures`（そのファイルの有効な capture の総数）を付けたもの。
+    length が不正な capture は無効として除く。
+    """
+    return [{**f["adopted"], "n_captures": f["n_captures"]}
+            for f in summarize_pdf_files(rows, before) if f["adopted"]]
 
 
 def archive_url(timestamp: str, original: str) -> str:
@@ -228,12 +308,16 @@ def capture_date(timestamp: str) -> str:
         return ""
 
 
-def build_rows(entry: dict, rid: str, cdx_rows: List[dict]) -> List[dict]:
+def build_rows(entry: dict, rid: str, cdx_rows: List[dict], before: str = "") -> List[dict]:
     """1 アイテム分の CSV 行（PDF ごとに 1 行。無ければ状態だけの 1 行）を作る。
 
-    `item_files_captured` は、このアイテムで保存を確認できた PDF の数。
+    `item_files_captured` は、このアイテムで保存を確認でき、上限より前の保存版を採用できた PDF の数。
     保存されなかったファイルは CDX に現れないため、部分保存は検出できない
     （アイテムのファイル総数は IRDB からも CDX からも分からない）。
+
+    `before` を指定したとき、上限より後にしか有効な capture が無いファイルは `after_cutoff` の行にする。
+    この行は file_url と全期間の集計（n_captures、digest_variants、integrity_status）だけを埋め、
+    採用版に依存する列（capture_*、mimetype、length、archive_url、digest の日付）は空にする。
     """
     base = {
         "title": entry.get("title", ""),
@@ -243,40 +327,109 @@ def build_rows(entry: dict, rid: str, cdx_rows: List[dict]) -> List[dict]:
         "record_url": entry.get("uri", ""),
         "record_id": rid,
     }
-    pdfs = pick_latest_pdfs(cdx_rows)
-    if pdfs:
-        return [{
-            **base,
-            "status": "ok",
-            "file_url": p["original"],
-            "capture_timestamp": p["timestamp"],
-            "capture_date": capture_date(p["timestamp"]),
-            "mimetype": p.get("mimetype", ""),
-            "length": p.get("length", ""),
-            "n_captures": p["n_captures"],
-            "item_files_captured": len(pdfs),
-            "archive_url": archive_url(p["timestamp"], p["original"]),
-        } for p in pdfs]
+    files = summarize_pdf_files(cdx_rows, before)
+    if files:
+        adopted_n = sum(1 for f in files if f["adopted"])
+        out = []
+        for f in files:
+            row = {
+                **base,
+                "file_url": f["original"],
+                "n_captures": f["n_captures"],
+                "item_files_captured": adopted_n,
+                "digest_variants": f["digest_variants"],
+                "integrity_status": f["integrity_status"],
+            }
+            p = f["adopted"]
+            if p is None:
+                out.append({**row, "status": "after_cutoff"})
+                continue
+            out.append({
+                **row,
+                "status": "ok",
+                "capture_timestamp": p["timestamp"],
+                "capture_date": capture_date(p["timestamp"]),
+                "mimetype": p.get("mimetype", ""),
+                "length": p.get("length", ""),
+                "archive_url": archive_url(p["timestamp"], p["original"]),
+                "capture_digest": f["capture_digest"],
+                "digest_first_seen": f["digest_first_seen"],
+                "later_digest_date": f["later_digest_date"],
+            })
+        return out
     status = "no_pdf" if cdx_rows else "no_capture"
     return [{**base, "status": status, "item_files_captured": 0}]
+
+
+# アイテム単位の status の優先順（1 行でも ok なら ok。次に after_cutoff）
+_ITEM_STATUS_RANK = {"ok": 2, "after_cutoff": 1}
 
 
 def summarize(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
     """(アイテム単位の status 内訳, ok 行 = 保存を確認できた PDF の総数) を返す。
 
-    アイテム単位では、PDF が複数あっても 1 件と数え、1 行でも ok なら ok とする。
+    アイテム単位では、PDF が複数あっても 1 件と数え、ok > after_cutoff > その他の順で代表させる。
     """
     item_status: Dict[str, str] = {}
     pdf_files = 0
     for r in rows:
         if r["status"] == "ok":
             pdf_files += 1
-        if item_status.get(r["record_id"]) != "ok":
+        cur = item_status.get(r["record_id"])
+        if cur is None or _ITEM_STATUS_RANK.get(r["status"], 0) > _ITEM_STATUS_RANK.get(cur, 0):
             item_status[r["record_id"]] = r["status"]
     by_status: Dict[str, int] = {}
     for st in item_status.values():
         by_status[st] = by_status.get(st, 0) + 1
     return by_status, pdf_files
+
+
+INTEGRITY_ORDER = ("consistent", "changed", "single", "unknown")
+
+
+def summarize_integrity(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
+    """ファイル単位（ok と after_cutoff の行）の integrity_status の内訳と、
+    採用した保存版より後に別の digest を観測したファイルの数を返す。"""
+    by: Dict[str, int] = {}
+    later = 0
+    for r in rows:
+        if r.get("status") not in ("ok", "after_cutoff"):
+            continue
+        st = r.get("integrity_status") or "unknown"
+        by[st] = by.get(st, 0) + 1
+        if r.get("later_digest_date"):
+            later += 1
+    return by, later
+
+
+def parse_capture_before(s: Optional[str]) -> str:
+    """--capture-before の値を 14 桁の UTC timestamp にする。空文字は ""（制限なし）を返す。
+
+    受け付ける形は YYYY-MM-DD、YYYYMMDD、YYYYMMDDhhmmss。日付だけのときは、その日の 00:00:00 UTC。
+    採用するのは、timestamp がこの値より前（未満）の capture。None を返さないのは、None が
+    resolve_options で「未指定」を意味するため（空文字で下位の設定を打ち消せるようにする）。
+    """
+    v = (s or "").strip()
+    if not v:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+        v = v.replace("-", "")
+    if re.fullmatch(r"\d{8}", v):
+        v += "000000"
+    if not re.fullmatch(r"\d{14}", v):
+        raise ValueError(f"日時として解釈できません: {s!r}（YYYY-MM-DD、YYYYMMDD、YYYYMMDDhhmmss）")
+    try:
+        datetime.strptime(v, "%Y%m%d%H%M%S")
+    except ValueError:
+        raise ValueError(f"存在しない日時です: {s!r}") from None
+    return v
+
+
+def describe_before(before: str) -> str:
+    """上限の説明（例: 2026-10-28 00:00:00 UTC（日本時間 2026-10-28 09:00:00）より前）。"""
+    t = datetime.strptime(before, "%Y%m%d%H%M%S")
+    jst = t + timedelta(hours=9)
+    return f"{t:%Y-%m-%d %H:%M:%S} UTC（日本時間 {jst:%Y-%m-%d %H:%M:%S}）より前"
 
 
 # ---------------------------------------------------------------------------
@@ -286,15 +439,19 @@ def summarize(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
 _EXPORT_JSON_RE = re.compile(r"^/records/(\d+)/export/json$")
 
 
-def group_export_json(rows: Iterable[dict]) -> Dict[str, List[dict]]:
+def group_export_json(rows: Iterable[dict], before: str = "") -> Dict[str, List[dict]]:
     """`/records/{id}/export/json` の有効な capture（200、length が正）をレコードごとに新しい順で返す。
 
     `--bulk` の `/record/` 配下の一括取得には、`/records/…` の行も含まれる（実測）。
+    `before` を指定したときは、それより前の capture だけを残す。候補が無いレコードはキーごと除く
+    （呼び出し側が `caps[0]` を参照するため）。
     """
     grouped: Dict[str, List[dict]] = {}
     for r in rows:
         m = _EXPORT_JSON_RE.match(urllib.parse.urlsplit(r.get("original", "")).path)
         if m and str(r.get("statuscode")) == "200" and has_valid_length(r):
+            if before and not r["timestamp"] < before:
+                continue
             grouped.setdefault(m.group(1), []).append(r)
     for caps in grouped.values():
         caps.sort(key=lambda r: r["timestamp"], reverse=True)
@@ -589,13 +746,47 @@ def repair_jsonl_tail(path: Path) -> None:
         warn(f"{path.name}: 末尾の不完全な行を除去しました")
 
 
+def is_current_query(obj: object) -> bool:
+    """キャッシュの 1 行が、現在の照会条件（取得項目とフィルタ）で取得したものか。"""
+    return isinstance(obj, dict) and obj.get("query") == CDX_QUERY
+
+
+def drop_stale_cache_lines(path: Path) -> int:
+    """CDX のキャッシュから、現在の照会条件と違う行（条件の無い旧形式を含む）を取り除く。
+
+    旧形式の行を残すと、読み込みのたびに読み飛ばすことになり、取り直しの警告も毎回出てしまう。
+    使えない行なので、ファイルから消して 1 回だけ警告する。読めない行も除く（末尾の不完全な行は
+    先に repair_jsonl_tail で処理しておく）。戻り値は除いた行数。
+    """
+    if not path.exists():
+        return 0
+    keep: List[str] = []
+    dropped = 0
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            obj = None
+        if is_current_query(obj):
+            keep.append(line + "\n")
+        elif line.strip():
+            dropped += 1
+    if dropped:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("".join(keep), encoding="utf-8")
+        os.replace(tmp, path)
+        warn(f"{path.name}: 取得項目が古いキャッシュ {dropped} 行を削除しました。"
+             "digest を含めて取り直します")
+    return dropped
+
+
 def cdx_for_record(http: Http, host: str, rid: str) -> List[dict]:
     rows: List[dict] = []
     for kind in PATH_KINDS:
         params = [
             ("url", f"{host}/{kind}/{rid}/files/"),
             ("matchType", "prefix"),
-            ("filter", "statuscode:200"),
+            ("filter", CDX_FILTER),
             ("fl", ",".join(CDX_FIELDS)),
             ("output", "json"),
         ]
@@ -611,8 +802,8 @@ BULK_TIMEOUT = 180  # 1 回の照会に 20〜60 秒かかる実測があるた�
 def load_bulk_cache(path: Path, host: str) -> Dict[str, dict]:
     """バルク取得の進捗を読む。kind ごとに {rows, resume, done}。
 
-    各行は 1 ページ分 {"host", "kind", "rows", "resume"}。resume が null のページが最終ページ。
-    host が違う行（host 欄の無い旧形式を含む）は使わない。
+    各行は 1 ページ分 {"host", "kind", "query", "rows", "resume"}。resume が null のページが最終ページ。
+    host が違う行（host 欄の無い旧形式を含む）と、照会条件（query）が現在と違う行は使わない。
     """
     state: Dict[str, dict] = {}
     if path.exists():
@@ -621,7 +812,7 @@ def load_bulk_cache(path: Path, host: str) -> Dict[str, dict]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue  # 中断で壊れた末尾行
-            if not isinstance(obj, dict) or obj.get("host") != host:
+            if not is_current_query(obj) or obj.get("host") != host:
                 continue
             st = state.setdefault(obj["kind"], {"rows": [], "resume": None, "done": False})
             st["rows"].extend(obj["rows"])
@@ -637,6 +828,7 @@ def fetch_bulk(http: Http, host: str, cache_path: Path,
     ページごとにキャッシュへ追記するので、中断しても同じ cache で再実行すれば続きから進む。
     """
     repair_jsonl_tail(cache_path)  # 読み込みより先に。UTF-8 の途中で切れていても読めるようにする
+    drop_stale_cache_lines(cache_path)
     state = load_bulk_cache(cache_path, host)
     with cache_path.open("a", encoding="utf-8") as cf:
         for kind in PATH_KINDS:
@@ -645,7 +837,7 @@ def fetch_bulk(http: Http, host: str, cache_path: Path,
                 params = [
                     ("url", f"{host}/{kind}/"),
                     ("matchType", "prefix"),
-                    ("filter", "statuscode:200"),
+                    ("filter", CDX_FILTER),
                     ("fl", ",".join(CDX_FIELDS)),
                     ("output", "json"),
                     ("limit", str(page_size)),
@@ -656,8 +848,8 @@ def fetch_bulk(http: Http, host: str, cache_path: Path,
                 text = http.get(f"{CDX_ENDPOINT}?{urllib.parse.urlencode(params)}",
                                 timeout=BULK_TIMEOUT)
                 rows, resume = parse_cdx_page(text)
-                cf.write(json.dumps({"host": host, "kind": kind, "rows": rows,
-                                     "resume": resume}, ensure_ascii=False) + "\n")
+                cf.write(json.dumps({"host": host, "kind": kind, "query": CDX_QUERY,
+                                     "rows": rows, "resume": resume}, ensure_ascii=False) + "\n")
                 cf.flush()
                 st["rows"].extend(rows)
                 st["resume"] = resume
@@ -686,7 +878,10 @@ def group_by_record(rows: Iterable[dict]) -> Dict[str, List[dict]]:
 
 
 def load_cdx_cache(path: Path, host: str) -> Dict[str, List[dict]]:
-    """レコードごとの CDX 結果のキャッシュ。host が違う行（旧形式を含む）は使わない。"""
+    """レコードごとの CDX 結果のキャッシュ。1 行 {"host", "rid", "query", "rows"}。
+
+    host が違う行と、照会条件（query）が現在と違う行（どちらも旧形式を含む）は使わない。
+    """
     cache: Dict[str, List[dict]] = {}
     if path.exists():
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -694,7 +889,7 @@ def load_cdx_cache(path: Path, host: str) -> Dict[str, List[dict]]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue  # 中断で壊れた末尾行
-            if not isinstance(obj, dict) or obj.get("host") != host:
+            if not is_current_query(obj) or obj.get("host") != host:
                 continue
             cache[obj["rid"]] = obj["rows"]
     return cache
@@ -760,9 +955,26 @@ def fetch_license(http: Http, host: str, rid: str, caps: List[dict]) -> Optional
     return {"host": host, "rid": rid, "latest": caps[0]["timestamp"], "info": None}
 
 
+def license_cache_usable(obj: dict, before: str = "") -> bool:
+    """キャッシュの 1 行を、上限 `before` の下で使えるか。
+
+    判定に使った export JSON の timestamp が上限より前であること。上限なしで取得した新しい
+    キャッシュを、取り直しに失敗したときに使ってしまわないため（Issue #5 の計画レビュー P1）。
+    info が null の行（取得を試したが読めなかった）は、判定に何も使わないので常に使える。
+    """
+    if not before or obj.get("info") is None:
+        return True
+    return str(obj.get("timestamp", "")) < before
+
+
 def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[str, List[dict]],
-                     cache_path: Path) -> Tuple[Dict[str, dict], int]:
-    """対象レコードのライセンス情報を集める。(rid → キャッシュ行, 通信エラーで未取得の件数)。"""
+                     cache_path: Path, before: str = "") -> Tuple[Dict[str, dict], int]:
+    """対象レコードのライセンス情報を集める。(rid → キャッシュ行, 通信エラーで未取得の件数)。
+
+    `before` を指定したときは、`export_caps` も上限で絞ったものを渡す。返す行は、判定に使った
+    export JSON の timestamp が上限より前のものだけ（満たさない古いキャッシュは、取り直しに
+    失敗しても返さない。そのレコードは no_json になる）。
+    """
     repair_jsonl_tail(cache_path)
     cache = load_license_cache(cache_path, host)
     todo = [r for r in rids if r in export_caps
@@ -787,7 +999,42 @@ def collect_licenses(http: Http, host: str, rids: List[str], export_caps: Dict[s
                      "（次回の実行で取り直します）")
             if i % 50 == 0:
                 info(f"export JSON: {i}/{len(todo)} 件")
-    return {r: cache[r] for r in rids if r in cache and r in export_caps}, errors
+    return {r: cache[r] for r in rids if r in cache and r in export_caps
+            and license_cache_usable(cache[r], before)}, errors
+
+
+NO_JSON_REASONS = {
+    "no_export": "export JSON の有効な保存（status 200、length が正）が無い",
+    "none_before": "export JSON の保存はあるが、指定日時より前の保存が無い",
+    "fetch_failed": "通信エラーで取得できなかった（次回の実行で取り直す）",
+    "unreadable": "試した保存がすべて 404 か JSON でなかった",
+}
+
+
+def license_missing_reasons(rids: Iterable[str], export_all: Dict[str, List[dict]],
+                            export_caps: Dict[str, List[dict]],
+                            licenses: Dict[str, dict]) -> Dict[str, int]:
+    """ライセンスが no_json になったレコードを、理由（NO_JSON_REASONS のキー）ごとに数える。
+
+    `export_all` は上限で絞る前、`export_caps` は絞った後の候補。`licenses` は collect_licenses の結果。
+    通信障害が「上限のため」に紛れないよう、上限前の候補が無いもの（none_before）と、候補はあるが
+    取得できなかったもの（fetch_failed）を分ける。
+    """
+    out: Dict[str, int] = {}
+    for rid in rids:
+        lic = licenses.get(rid)
+        if lic is not None and lic.get("info") is not None:
+            continue  # no_json ではない
+        if rid not in export_all:
+            reason = "no_export"
+        elif rid not in export_caps:
+            reason = "none_before"
+        elif lic is not None and lic.get("latest") == export_caps[rid][0]["timestamp"]:
+            reason = "unreadable"  # 最新の候補まで試し終えて、読めなかった
+        else:
+            reason = "fetch_failed"
+        out[reason] = out.get(reason, 0) + 1
+    return out
 
 
 DEFAULT_ENV_FILE = ".env"
@@ -836,6 +1083,7 @@ ENV_OPTIONS: Dict[str, Tuple[str, object, object]] = {
     "WB_BULK": ("bulk", parse_bool, True),
     "WB_BULK_PAGE_SIZE": ("bulk_page_size", int, BULK_PAGE_SIZE),
     "WB_LICENSE": ("license", parse_bool, True),
+    "WB_CAPTURE_BEFORE": ("capture_before", parse_capture_before, ""),  # "" は制限なし
     "WB_CONTACT": ("contact", str, ""),
 }
 _ENV_KEY_BY_DEST = {dest: key for key, (dest, _, _) in ENV_OPTIONS.items()}
@@ -877,6 +1125,14 @@ def resolve_options(args: argparse.Namespace, environ: Dict[str, str],
     return warnings
 
 
+def _cli_capture_before(s: str) -> str:
+    """argparse 用。不正な値を argparse のエラーとして表示する。"""
+    try:
+        return parse_capture_before(s)
+    except ValueError as ex:
+        raise argparse.ArgumentTypeError(str(ex)) from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -902,6 +1158,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help=_env_help("license", "Wayback に保存された export JSON からライセンス情報を"
                                    "取得する。--no-license で取得せず、ライセンスの列を空にする。"
                                    "--bulk のときだけ有効"))
+    ap.add_argument("--capture-before", type=_cli_capture_before, default=None, metavar="DATE",
+                    help=_env_help("capture_before",
+                                   "採用する保存版の日時の上限。UTC で、この日時より前（未満）の保存版から"
+                                   "最新の有効なものを選ぶ。YYYY-MM-DD、YYYYMMDD、YYYYMMDDhhmmss で指定し、"
+                                   "日付だけなら 00:00:00 UTC（日本時間 09:00）。例: 2026-10-28 は "
+                                   "2026-10-28 00:00:00 UTC より前。digest の比較は上限より後も含む全期間で行う。"
+                                   "ライセンス判定に使う export JSON にも適用する。空文字で制限なし",
+                                   "制限なし"))
     ap.add_argument("--env-file", default=None,
                     help=f"設定ファイル（既定: カレントディレクトリの {DEFAULT_ENV_FILE}。無ければ読まない）。"
                          "優先順はコマンドライン > 環境変数 > .env > 既定値")
@@ -944,6 +1208,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         args.license = False
     host = args.host.strip().lower()
     query = args.query if args.query else host
+    before = args.capture_before or ""
+    if before:
+        info(f"採用する保存版の日時の上限: {describe_before(before)}")
 
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -984,6 +1251,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     bulk: Optional[Dict[str, List[dict]]] = None
     licenses: Optional[Dict[str, dict]] = None
+    export_all: Dict[str, List[dict]] = {}
+    export_caps: Dict[str, List[dict]] = {}
     license_errors = 0
     if args.bulk:
         try:
@@ -995,14 +1264,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         bulk = group_by_record(bulk_rows)
         info(f"バルク取得: {len(bulk)} レコード分")
         if args.license:
-            export_caps = group_export_json(bulk_rows)
-            info(f"export JSON の保存があるレコード: {len(export_caps)} 件")
+            export_all = group_export_json(bulk_rows)
+            export_caps = group_export_json(bulk_rows, before)
+            info(f"export JSON の保存があるレコード: {len(export_all)} 件"
+                 + (f"（うち指定日時より前の保存があるもの {len(export_caps)} 件）" if before else ""))
             licenses, license_errors = collect_licenses(
                 http, host, [rid for _, rid in targets], export_caps,
-                cache_dir / "export_json.jsonl")
+                cache_dir / "export_json.jsonl", before)
 
     cdx_cache_path = cache_dir / "cdx.jsonl"
     repair_jsonl_tail(cdx_cache_path)  # 読み込みより先に（UTF-8 の途中で切れていても読めるようにする）
+    if bulk is None:
+        drop_stale_cache_lines(cdx_cache_path)
     cdx_cache = load_cdx_cache(cdx_cache_path, host)
     out_rows: List[dict] = []
     errors = 0
@@ -1019,12 +1292,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     warn(f"record {rid}: CDX 照会に失敗 ({ex})")
                     errors += 1
                     out_rows.append({**build_rows(entry, rid, [])[0], "status": "cdx_error",
-                                     "item_files_captured": ""})  # 不明（0 ではない）
+                                     "item_files_captured": "",  # 不明（0 ではない）
+                                     "integrity_status": "unknown"})
                     continue
-                cf.write(json.dumps({"host": host, "rid": rid, "rows": rows},
+                cf.write(json.dumps({"host": host, "rid": rid, "query": CDX_QUERY, "rows": rows},
                                     ensure_ascii=False) + "\n")
                 cf.flush()
-            item_rows = build_rows(entry, rid, rows)
+            item_rows = build_rows(entry, rid, rows, before)
             if licenses is not None:
                 item_rows = add_license_columns(item_rows, licenses.get(rid))
             out_rows.extend(item_rows)
@@ -1041,14 +1315,27 @@ def main(argv: Optional[List[str]] = None) -> int:
          + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())))
     if judged:
         ok_items = by_status.get("ok", 0)
-        info(f"アイテム単位の保存確認率: {ok_items}/{judged} = {ok_items / judged:.1%}"
+        label = ("指定日時より前の保存版を確認できた率" if before else "アイテム単位の保存確認率")
+        info(f"{label}: {ok_items}/{judged} = {ok_items / judged:.1%}"
              "（1 件でも PDF の保存を確認できたアイテム。部分保存は検出できない）")
+        if before and by_status.get("after_cutoff"):
+            info(f"指定日時以降の保存しか無いアイテム（after_cutoff）: {by_status['after_cutoff']} 件")
     info(f"ファイル単位: 保存を確認できた PDF {pdf_files} 件（ok の行数）")
+    by_int, later = summarize_integrity(out_rows)
+    if by_int:
+        info("保存履歴の digest（ファイル単位。取得済みの比較可能な履歴での判定）: "
+             + ", ".join(f"{k}={by_int[k]}" for k in INTEGRITY_ORDER if k in by_int))
+        info(f"採用した保存版より後に、別の digest の保存を観測したファイル: {later} 件")
     if licenses is not None:
         by_lic, ok_cc = summarize_licenses(out_rows)
         info("ライセンス（アイテム単位）: "
              + ", ".join(f"{k}={v}" for k, v in sorted(by_lic.items())))
         info(f"PDF の保存があり、ライセンスが CC のアイテム: {ok_cc} 件")
+        reasons = license_missing_reasons([rid for _, rid in targets], export_all, export_caps,
+                                          licenses)
+        for k, text in NO_JSON_REASONS.items():
+            if reasons.get(k):
+                info(f"ライセンス未確認（no_json）の理由: {text} {reasons[k]} 件")
     if errors:
         warn(f"CDX 照会の失敗 {errors} 件。同じコマンドで再実行すると、失敗分だけ取り直します")
     if license_errors:
