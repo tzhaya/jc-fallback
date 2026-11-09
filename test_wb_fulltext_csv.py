@@ -649,7 +649,7 @@ def test_fetch_license_transient_then_fallback_stays_retryable():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "export_json.jsonl"
         got, err = w.collect_licenses(http, "h", ["1"], {"1": caps}, p)
-        assert err == 1 and got["1"]["timestamp"] == "1"  # 今回は古い保存で判定する
+        assert err == 1 and got["1"]["timestamp"] == "1"  # 今回は古いスナップショットで判定する
         # 次回は最新を取り直す
         http2 = _UrlHttp({w.archive_url("2", orig): json.dumps(EXPORT_JIRCAS)})
         got, err = w.collect_licenses(http2, "h", ["1"], {"1": caps}, p)
@@ -840,7 +840,7 @@ def test_no_license_leaves_license_columns_empty():
 
 
 # ---------------------------------------------------------------------------
-# 保存履歴の digest と --capture-before（Issue #5）
+# スナップショットの履歴の digest 値と --capture-before（Issue #5）
 # ---------------------------------------------------------------------------
 
 # 形式が正しい 32 文字の Base32（実測値。A は 2000258、B は 2000885 の digest）
@@ -980,7 +980,7 @@ def test_after_cutoff_rows_and_item_files_captured():
 
 
 def test_changed_row_still_has_archive_url():
-    # changed はバイト列の差異で、内容の変更とは限らない（途中で切れた保存、gzip）。
+    # changed はバイト列の差異で、内容の変更とは限らない（途中で切れたスナップショット、gzip）。
     # 判断は利用者が行うので、changed でも PDF へのリンクは出す
     _, entries = w.parse_atom(ATOM_FIXTURE)
     rows = w.build_rows(entries[0], "1", [_dcap("20250101000000", DIG_A),

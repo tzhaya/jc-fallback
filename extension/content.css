@@ -50,7 +50,7 @@
   margin-left: 2px;
 }
 
-/* 途中で切れている可能性（Issue #7）。注意と、別の保存版へのリンク。 */
+/* 途中で切れている可能性（Issue #7）。注意と、別のアーカイブ版へのリンク。 */
 #wbfb-panel .wbfb-trunc { display: block; font-size: 14px; }
 #wbfb-panel .wbfb-trunc:empty { display: none; }
 #wbfb-panel .wbfb-trunc > span { display: block; }

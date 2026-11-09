@@ -224,7 +224,7 @@ footer p { margin: 0 0 4px; }
   <div class="container">
     <h1>機関リポジトリメタデータ 簡易検索サービス（農研機構・サンプル）</h1>
     <p><a href="https://github.com/tzhaya/jc-fallback">JAIRO Cloud メタデータ取得・検索ツール</a>で作成した簡易検索サービスのサンプルです。国際農研機関リポジトリのデータを使用しています。</p>
-    <p>IRDBから取得した機関リポジトリのメタデータを検索します。Wayback Machine に PDF ファイルが保存されていて、CC ライセンスであることを確認できたものだけ、PDF へのリンクを表示します。</p>
+    <p>IRDBから取得した機関リポジトリのメタデータを検索します。Wayback Machine に PDF ファイルのアーカイブ版があり、CC ライセンスであることを確認できたものだけ、PDF へのリンクを表示します。</p>
   </div>
 </header>
 
@@ -262,7 +262,7 @@ footer p { margin: 0 0 4px; }
           <th scope="col">刊行年月</th>
           <th scope="col">レコード番号</th>
           <th scope="col">ライセンス</th>
-          <th scope="col">保存日</th>
+          <th scope="col">アーカイブ日</th>
           <th scope="col">リンク</th>
         </tr>
       </thead>
@@ -276,10 +276,11 @@ footer p { margin: 0 0 4px; }
   <div class="container">
     <p>PDF は、表示されている CC ライセンスの条件（クレジットの表示、非営利、改変禁止など）に従って利用してください。正確なライセンスは、IRDB または提供機関で確認してください。</p>
     <p>PDF へのリンクは Internet Archive の Wayback Machine 上のファイルです。Internet Archive の利用条件にも従ってください。</p>
-    <p>「取得可」は、Wayback Machine に PDF の保存を確認できたことを示します。複数ファイルのうち一部だけが保存されている場合は区別できません。</p>
-    <p>「基準日時以降のみ」は、データの作成時に指定した日時より後の保存しか無く、リンクを出していない PDF です。</p>
-    <p>「保存が途中で切れている可能性があります」は、リンク先の保存版より保存データが大きい、別の保存版があるものです。Wayback Machine は大きなファイルを途中までしか保存しないことがあり、途中で切れた版は PDF として開けないことがあります。保存データの長さからの推定なので、ファイルの差し替えなどでも表示されます。開けないときは「別の保存版」を試してください（完全な版であることは保証しません）。</p>
-    <p>ライセンスは、Wayback Machine に保存されたリポジトリのメタデータ（権利情報と、ファイルごとのライセンス種別）から判定しています。保存されたメタデータが古い場合や、保存されていない場合があります。「要確認」は、2つの情報が食い違うものです。</p>
+    <p>「取得可」は、Wayback Machine に PDF のアーカイブ版があることを確認できたものです。複数ファイルのうち一部だけがアーカイブされている場合は区別できません。</p>
+    <p>「アーカイブ版なし」は、データの作成時に、PDF のアーカイブ版が見つからなかったものです。Wayback Machine に存在しないことを確かめたものではありません。</p>
+    <p>「基準日時以降のみ」は、データの作成時に指定した日時より後のアーカイブ版しか無く、リンクを出していない PDF です。</p>
+    <p>「アーカイブ版が途中で切れている可能性があります」は、リンク先のアーカイブ版より、Wayback Machine が記録したデータの大きい、別のアーカイブ版があるものです。Wayback Machine は大きなファイルを途中までしかアーカイブしないことがあり、途中で切れたアーカイブ版は PDF として開けないことがあります。記録されたデータの大きさからの推定なので、ファイルの差し替えなどでも表示されます。開けないときは「別のアーカイブ版」を試してください（完全な版であることは保証しません）。</p>
+    <p>ライセンスは、Wayback Machine にアーカイブされたリポジトリのメタデータ（権利情報と、ファイルごとのライセンス種別）から判定しています。アーカイブされたメタデータが古い場合や、アーカイブされていない場合があります。「要確認」は、2つの情報が食い違うものです。</p>
     <p>表示されているメタデータとリンクはデータ取得時点のものです。変更されている場合があります。</p>
   </div>
 </footer>
@@ -291,7 +292,7 @@ footer p { margin: 0 0 4px; }
   var CSV_URL = "result_naro.csv";
   var LABELS = {
     ok: "取得可",
-    no_capture: "未保存",
+    no_capture: "アーカイブ版なし",
     no_pdf: "PDFなし",
     cdx_error: "照会エラー",
     after_cutoff: "基準日時以降のみ"
@@ -305,7 +306,7 @@ footer p { margin: 0 0 4px; }
     no_rights: "権利情報なし",
     no_json: "未確認"
   };
-  /* 保存履歴の digest の比較（担当者向けだけに表示する） */
+  /* スナップショットの履歴の digest 値の比較（担当者向けだけに表示する） */
   var INTEGRITY_LABELS = {
     consistent: "履歴で一致",
     changed: "差異あり",
@@ -313,8 +314,8 @@ footer p { margin: 0 0 4px; }
     unknown: "判定不能"
   };
 
-  var TRUNC_WARNING = "保存が途中で切れている可能性があります";
-  var TRUNC_DETAIL = "保存データの長さからの推定です。ファイルの差し替えや、圧縮されたままの保存でも表示されます。";
+  var TRUNC_WARNING = "アーカイブ版が途中で切れている可能性があります";
+  var TRUNC_DETAIL = "Wayback Machine が記録したデータの大きさからの推定です。ファイルの差し替えや、圧縮されたままアーカイブされた場合にも表示されます。";
 
   var $ = function (id) { return document.getElementById(id); };
   var els = {
@@ -474,7 +475,7 @@ footer p { margin: 0 0 4px; }
     items.forEach(function (p) {
       var a = link(p[0], p[1]);
       if (a) links.appendChild(a);
-      /* 一般向けは、PDF へのリンクの直後に注意と別の保存版を出す（CC の行だけ） */
+      /* 一般向けは、PDF へのリンクの直後に注意と別のアーカイブ版を出す（CC の行だけ） */
       if (a && PUBLIC && p[0] === o.archive_url && showTruncation(o)) links.appendChild(truncationBox(o));
     });
     tr.appendChild(td("links", links));
@@ -482,8 +483,8 @@ footer p { margin: 0 0 4px; }
   }
 
   /*
-   * 途中で切れている可能性（Issue #7）。採用した保存版が、digest の違う保存版より小さいもの。
-   * 採用は変えず、注意と、基準日時より前の大きい保存版（alt_archive_url）へのリンクを出す。
+   * 途中で切れている可能性（Issue #7）。採用したスナップショットが、digest 値の違うものより小さいもの。
+   * 採用は変えず、注意と、基準日時より前の大きいアーカイブ版（alt_archive_url）へのリンクを出す。
    * 一般向けは、PDF へのリンクを出す行（CC）だけ。新しい列の無い旧 CSV では何も出さない。
    */
   function showTruncation(o) {
@@ -502,21 +503,21 @@ footer p { margin: 0 0 4px; }
     }
     text("trunc-warning", TRUNC_WARNING);
     text("", TRUNC_DETAIL);
-    var a = link(o.alt_archive_url, "別の保存版（" + (o.alt_capture_date || "日付不明") + "）");
+    var a = link(o.alt_archive_url, "別のアーカイブ版（" + (o.alt_capture_date || "日付不明") + "）");
     if (a) {
-      text("", "開けないときは、別の保存版を試してください。");
+      text("", "開けないときは、別のアーカイブ版を試してください。");
       box.appendChild(a);
       /* 同じ日の中の時刻の違いは区別しない（CSV の列は日付だけ） */
       if (!PUBLIC && o.larger_capture_date && o.larger_capture_date !== o.alt_capture_date) {
-        text("", "全期間で最大の保存: " + o.larger_capture_date + "（基準日時以降）");
+        text("", "全期間で最大のスナップショット: " + o.larger_capture_date + "（基準日時以降）");
       }
     } else if (o.larger_capture_date) {
-      text("", "より大きい保存版は基準日時以降にだけあります（" + o.larger_capture_date + "）");
+      text("", "より大きいアーカイブ版は基準日時以降にだけあります（" + o.larger_capture_date + "）");
     }
     return box;
   }
 
-  /* 保存日と、担当者向けには保存履歴の比較結果。新しい列の無い旧 CSV では保存日だけを出す */
+  /* アーカイブ日と、担当者向けにはスナップショットの履歴の比較結果。新しい列の無い旧 CSV ではアーカイブ日だけを出す */
   function captureCell(o) {
     var box = document.createElement("div");
     box.appendChild(document.createTextNode(o.capture_date || ""));
@@ -529,10 +530,10 @@ footer p { margin: 0 0 4px; }
       wrap.appendChild(label);
       box.appendChild(wrap);
       if (o.later_digest_date) {
-        note(box, "この保存版より後に、digest の違う保存あり（" + o.later_digest_date + "）");
+        note(box, "このスナップショットより後に、digest 値の違うスナップショットあり（" + o.later_digest_date + "）");
       }
       if (o.digest_first_seen && o.digest_first_seen !== o.capture_date) {
-        note(box, "同じ digest の最初の保存: " + o.digest_first_seen);
+        note(box, "同じ digest 値の最初のスナップショット: " + o.digest_first_seen);
       }
     }
     if (showTruncation(o)) box.appendChild(truncationBox(o));
