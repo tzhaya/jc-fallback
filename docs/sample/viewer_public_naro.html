@@ -302,7 +302,7 @@ footer p { margin: 0 0 4px; }
   /* 保存履歴の digest の比較（担当者向けだけに表示する） */
   var INTEGRITY_LABELS = {
     consistent: "履歴で一致",
-    changed: "変更あり",
+    changed: "差異あり",
     single: "履歴不足",
     unknown: "判定不能"
   };
@@ -487,10 +487,10 @@ footer p { margin: 0 0 4px; }
       box.appendChild(n);
     }
     if (o.later_digest_date) {
-      note("この保存版より後に、別の内容の保存を確認（" + o.later_digest_date + "）");
+      note("この保存版より後に、digest の違う保存あり（" + o.later_digest_date + "）");
     }
     if (o.digest_first_seen && o.digest_first_seen !== o.capture_date) {
-      note("同じ内容の最初の保存: " + o.digest_first_seen);
+      note("同じ digest の最初の保存: " + o.digest_first_seen);
     }
     return box;
   }

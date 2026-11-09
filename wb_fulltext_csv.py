@@ -34,9 +34,11 @@ WB_HOST=jircas.repo.nii.ac.jp のように書いておける（キーは WB_ + �
 キャッシュは検索条件（IRDB 一覧）とホスト・照会条件（CDX）ごとに識別され、条件が違えば再利用しない。
 
 保存履歴の digest（Issue #5）:
-  CDX の digest を、同じ本文 URL の capture どうしで比べ、integrity_status（consistent / changed /
-  single / unknown）を CSV に出す。比べるのは取得済みの比較可能な履歴だけで、digest の一致は
-  真正性を保証しない。正規の差し替えと改ざんも区別できない。
+  CDX の digest（Wayback が保存したバイト列の SHA-1）を、同じ本文 URL の capture どうしで比べ、
+  integrity_status（consistent / changed / single / unknown）を CSV に出す。比べるのは取得済みの
+  比較可能な履歴だけで、digest の一致は真正性を保証しない。changed はバイト列の差異であり、
+  内容の変更（正規の差し替えと改ざんは区別できない）のほか、途中で切れた保存や gzip のまま
+  保存されたものでも起きる。changed でも archive_url は出す（判断は利用者が行う）。
   --capture-before 2026-10-28 のように指定すると、UTC でその日時より前（未満）の保存版から
   最新のものを採用する（日付だけなら 00:00:00 UTC = 日本時間 09:00）。上限より後にしか保存が無い
   ファイルは status=after_cutoff になる。ライセンス判定に使う export JSON にも同じ上限を適用する。

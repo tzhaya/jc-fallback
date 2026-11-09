@@ -13,14 +13,14 @@ Python のテスト（`test_wb_fulltext_csv.py`）からは使いません。
 
 | レコード番号 | status | integrity_status | 確かめること |
 |---|---|---|---|
-| 9000001 | ok | consistent | 「履歴で一致」と「同じ内容の最初の保存」が出る |
-| 9000002 | ok | changed | 「変更あり」と「この保存版より後に、別の内容の保存を確認（2026-11-01）」が出る |
-| 9000003 | ok | changed | 採用版の digest が欠けているので、「変更あり」だけが出て、日付の注記は出ない |
+| 9000001 | ok | consistent | 「履歴で一致」と「同じ digest の最初の保存」が出る |
+| 9000002 | ok | changed | 「差異あり」と「この保存版より後に、digest の違う保存あり（2026-11-01）」が出る。PDF へのリンクも出る |
+| 9000003 | ok | changed | 採用版の digest が欠けているので、「差異あり」だけが出て、日付の注記は出ない |
 | 9000004 | ok | single | 「履歴不足」が出る |
 | 9000005 | ok | unknown | 「判定不能」が出る |
 | 9000006 | ok と after_cutoff | single | 状態が「取得可」と「基準日時以降のみ」の 2 行。`item_files_captured` は両方 1 |
 | 9000007 | after_cutoff | single | 「基準日時以降のみ」。保存日とリンクは出ない |
-| 9000008 | ok | consistent | 「同じ内容の最初の保存: 2024-01-01」が出る |
+| 9000008 | ok | consistent | 「同じ digest の最初の保存: 2024-01-01」が出る |
 | 9000009 | cdx_error | unknown | 「照会エラー」と「判定不能」が出る |
 
 ## viewer_legacy.csv

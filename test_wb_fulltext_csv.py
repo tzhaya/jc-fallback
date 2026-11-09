@@ -979,6 +979,16 @@ def test_after_cutoff_rows_and_item_files_captured():
                                                          [_dcap("20261101000000", DIG_B, "b.pdf", "2")]))
 
 
+def test_changed_row_still_has_archive_url():
+    # changed はバイト列の差異で、内容の変更とは限らない（途中で切れた保存、gzip）。
+    # 判断は利用者が行うので、changed でも PDF へのリンクは出す
+    _, entries = w.parse_atom(ATOM_FIXTURE)
+    rows = w.build_rows(entries[0], "1", [_dcap("20250101000000", DIG_A),
+                                          _dcap("20250601000000", DIG_B)])
+    assert rows[0]["status"] == "ok" and rows[0]["integrity_status"] == "changed"
+    assert rows[0]["archive_url"] == w.archive_url("20250601000000", "https://h/record/1/files/a.pdf")
+
+
 def test_summarize_integrity():
     rows = [{"status": "ok", "integrity_status": "consistent"},
             {"status": "ok", "integrity_status": "changed", "later_digest_date": "2026-11-01"},
