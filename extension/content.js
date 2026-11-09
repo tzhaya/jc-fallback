@@ -26,6 +26,10 @@
     invalid: "The archived copy may be broken, so no link is shown",
     error: "Could not check the archive (the link may not open)",
     retry: "Check again",
+    truncated: "This archived copy may be incomplete (cut off partway).",
+    truncatedNote: "This is estimated from the archived data size. It may also appear when the file was replaced or archived in compressed form.",
+    tryAlt: "If it does not open, try another archived copy: ",
+    altLink: (d) => "copy saved on " + d,
     cc: (n) => "The rights statement specifies " + n + ", so links to the archived PDFs are shown.",
     notCc: "No Creative Commons license was found in the rights statement, so links to the full-text PDFs are not shown.",
     conflict: (n) => "The rights statement lists different licenses (" + n + "), so links to the full-text PDFs are not shown.",
@@ -50,6 +54,10 @@
     invalid: "保存版が壊れている可能性があるため、リンクを表示しません",
     error: "保存状況を確認できませんでした（リンク先を開けない場合があります）",
     retry: "再確認",
+    truncated: "保存が途中で切れている可能性があります。",
+    truncatedNote: "保存データの長さからの推定です。ファイルの差し替えや、圧縮されたままの保存でも表示されます。",
+    tryAlt: "開けないときは、別の保存版を試してください：",
+    altLink: (d) => d + " に保存された版",
     cc: (n) => "権利情報に " + n + " が指定されているため、本文 PDF の保存版へのリンクを表示します。",
     notCc: "権利情報に CC ライセンスが見つからないため、本文 PDF へのリンクは表示しません。",
     conflict: (n) => "権利情報に異なるライセンス（" + n + "）が書かれているため、本文 PDF へのリンクは表示しません。",
@@ -195,14 +203,18 @@
    * 1 項目分の表示。確認中は項目名をリンクにせず、CDX の結果が届いてからリンクにする。
    * 照会に失敗したときは、最新の保存版への転送 URL（provisional）をリンクにする。
    * apply(result) は {href, timestamp, state}（state: ok / none / invalid）を返す。
+   * 本文の PDF では、ok のときに truncated（途中で切れている可能性）と alt（{href, timestamp}。
+   * 別の保存版）も返し、注意と別の保存版へのリンクを出す（Issue #7）。ランディングページは返さない。
    */
   function item(label, provisional, kind, data, apply) {
     const status = el("span", { class: "wbfb-status", role: "status" }, ...checking());
     const holder = el("span", { class: "wbfb-link" }, pending(label));
-    const li = el("li", {}, holder, status);
+    const extra = el("span", { class: "wbfb-trunc" });
+    const li = el("li", {}, holder, status, extra);
 
     async function run() {
       holder.replaceChildren(pending(label));
+      extra.replaceChildren();
       status.replaceChildren(...checking());
       const res = await ask(kind, data.host, data.id);
       if (!res.ok) {
@@ -216,6 +228,12 @@
       if (r.state === "ok") {
         holder.replaceChildren(link(r.href, label));
         status.textContent = T.paren(T.saved(WBF.captureDate(r.timestamp)));
+        if (r.truncated) {
+          extra.replaceChildren(el("span", {}, el("span", { class: "wbfb-warning" }, T.truncated), " ", T.truncatedNote));
+          if (r.alt) {
+            extra.append(el("span", {}, T.tryAlt, link(r.alt.href, T.altLink(WBF.captureDate(r.alt.timestamp)))));
+          }
+        }
       } else {
         holder.replaceChildren(el("span", { class: "wbfb-name" }, label));
         status.textContent = T.sep + (r.state === "invalid" ? T.invalid : T.none);
@@ -252,7 +270,11 @@
           const it = item(f.name, WBF.archiveUrl(f.href, null, true), "files", data, (r) => {
             const c = r[f.name];
             if (c && c.status === "ok") {
-              return { state: "ok", href: WBF.archiveUrl(c.original, c.timestamp, true), timestamp: c.timestamp };
+              return {
+                state: "ok", href: WBF.archiveUrl(c.original, c.timestamp, true), timestamp: c.timestamp,
+                truncated: !!c.possiblyTruncated,
+                alt: c.alt ? { href: WBF.archiveUrl(c.alt.original, c.alt.timestamp, true), timestamp: c.alt.timestamp } : null,
+              };
             }
             return { state: c ? "invalid" : "none" };
           });

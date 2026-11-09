@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Wayback 代替リンク（JAIRO Cloud × IRDB）",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "IRDB の詳細ページに、JAIRO Cloud の資料の Wayback Machine 保存版へのリンクを表示します。本文 PDF は CC ライセンスの資料だけです。",
   "permissions": ["storage"],
   "host_permissions": ["https://web.archive.org/*"],

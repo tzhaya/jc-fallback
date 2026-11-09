@@ -43,6 +43,14 @@ WB_HOST=jircas.repo.nii.ac.jp のように書いておける（キーは WB_ + �
   最新のものを採用する（日付だけなら 00:00:00 UTC = 日本時間 09:00）。上限より後にしか保存が無い
   ファイルは status=after_cutoff になる。ライセンス判定に使う export JSON にも同じ上限を適用する。
   上限の指定はリスクを下げる手段であり、安全を保証しない。
+
+途中で切れている可能性（Issue #7）:
+  採用した保存版より length が大きく、digest の違う保存版があれば possibly_truncated=1 にする
+  （クローラのサイズ上限で途中までしか保存されず、開けない PDF がある）。採用は変えない。
+  larger_capture_date は全期間でいちばん大きい版の保存日、alt_capture_date と alt_archive_url は
+  上限より前でいちばん大きい版（同じ長さなら新しいもの）。CDX の length は圧縮後の長さなので推定にすぎず、
+  正規の差し替えや gzip のまま保存された版でも 1 になり、保存が 1 件だけのものは検出できない。
+  空は「この条件に当たらない」という意味で、正常を確かめたものではない。
 """
 
 from __future__ import annotations
@@ -82,6 +90,9 @@ PATH_KINDS = ("record",)
 PRISM_FIELDS = ("issn", "publicationName", "volume", "number",
                 "startingPage", "endingPage", "publicationDate")
 
+TRUNCATION_COLUMNS = ("possibly_truncated", "larger_capture_date", "alt_capture_date",
+                      "alt_archive_url")
+
 CSV_COLUMNS = [
     "status", "title", *PRISM_FIELDS, "updated", "irdb_url", "record_url", "record_id",
     "file_url", "capture_timestamp", "capture_date", "mimetype", "length",
@@ -91,6 +102,8 @@ CSV_COLUMNS = [
     # 保存履歴の digest の比較（Issue #5）。既存の列の位置を変えないよう末尾に足す
     *("capture_digest", "digest_variants", "integrity_status", "digest_first_seen",
       "later_digest_date"),
+    # 途中で切れている可能性（Issue #7）。採用版が digest の違う保存版より小さいもの
+    *TRUNCATION_COLUMNS,
 ]
 
 # WEKO3 のファイル情報の licensetype のうち CC のもの（NC/ND 付きも CC として扱う）。
@@ -245,6 +258,51 @@ def integrity_status(digests: List[str]) -> str:
     return "consistent" if len(digests) >= 2 else "single"
 
 
+def length_int(r: dict) -> Optional[int]:
+    """CDX の length を整数で返す。空や数値でない値は None（例外にしない）。"""
+    try:
+        return int(str(r.get("length", "")).strip())
+    except ValueError:
+        return None
+
+
+def _largest(caps: List[dict]) -> Optional[dict]:
+    """length が最大の capture（同じなら新しいもの）。空なら None。"""
+    return max(caps, key=lambda c: (length_int(c), c["timestamp"])) if caps else None
+
+
+def truncation_check(caps: List[dict], digests: List[str], adopted: Optional[dict],
+                     before: str = "") -> dict:
+    """採用版が、digest の違うほかの保存版より小さいか（途中で切れている可能性）を調べる（Issue #7）。
+
+    比較対象は、digest が欠損しておらず採用版と違い、length が整数として読めて採用版より大きい capture。
+    CDX の length は圧縮後の WARC レコード長なので、これは本文サイズの推定にすぎない。
+    警告（possibly_truncated）と larger_capture_date は全期間の比較対象で決め、代替リンク
+    （alt_capture_date、alt_archive_url）は上限より前（未満）の比較対象から選ぶ。どちらも length が
+    最大のもの（同じなら新しいもの）。該当しなければ 4 つとも空（正常を確かめたという意味ではない）。
+    """
+    empty = {"possibly_truncated": "", "larger_capture_date": "",
+             "alt_capture_date": "", "alt_archive_url": ""}
+    if adopted is None:
+        return empty
+    ad = normalize_digest(adopted.get("digest"))
+    ad_len = length_int(adopted)
+    if not ad or ad_len is None:
+        return empty
+    larger = [c for c, d in zip(caps, digests)
+              if d and d != ad and (length_int(c) or 0) > ad_len]
+    if not larger:
+        return empty
+    top = _largest(larger)
+    alt = _largest([c for c in larger if not before or c["timestamp"] < before])
+    return {
+        "possibly_truncated": "1",
+        "larger_capture_date": capture_date(top["timestamp"]),
+        "alt_capture_date": capture_date(alt["timestamp"]) if alt else "",
+        "alt_archive_url": archive_url(alt["timestamp"], alt["original"]) if alt else "",
+    }
+
+
 def summarize_pdf_files(rows: Iterable[dict], before: str = "") -> List[dict]:
     """status 200 で length が正の PDF capture を、ファイルごとにまとめる。
 
@@ -253,8 +311,10 @@ def summarize_pdf_files(rows: Iterable[dict], before: str = "") -> List[dict]:
     取得済みの全期間の capture で行う（上限より後の変化こそ知りたい情報のため）。
 
     返す各要素: original（採用版の URL。無ければ最新の capture の URL）, adopted, n_captures,
-    digest_variants, integrity_status, capture_digest, digest_first_seen, later_digest_date。
-    日付の 2 列は、採用版の digest が欠損なら空。後続の欠損 digest は「別の digest」と数えない。
+    digest_variants, integrity_status, capture_digest, digest_first_seen, later_digest_date と、
+    `truncation_check` の 4 項目（possibly_truncated、larger_capture_date、alt_capture_date、
+    alt_archive_url）。日付の 2 列は、採用版の digest が欠損なら空。後続の欠損 digest は
+    「別の digest」と数えない。
     """
     groups: Dict[Tuple[str, str], List[dict]] = {}
     for r in rows:
@@ -284,6 +344,7 @@ def summarize_pdf_files(rows: Iterable[dict], before: str = "") -> List[dict]:
             "capture_digest": ad,
             "digest_first_seen": first_seen,
             "later_digest_date": later,
+            **truncation_check(caps, digests, adopted, before),
         })
     return out
 
@@ -357,6 +418,7 @@ def build_rows(entry: dict, rid: str, cdx_rows: List[dict], before: str = "") ->
                 "capture_digest": f["capture_digest"],
                 "digest_first_seen": f["digest_first_seen"],
                 "later_digest_date": f["later_digest_date"],
+                **{k: f[k] for k in TRUNCATION_COLUMNS},
             })
         return out
     status = "no_pdf" if cdx_rows else "no_capture"
@@ -402,6 +464,12 @@ def summarize_integrity(rows: Iterable[dict]) -> Tuple[Dict[str, int], int]:
         if r.get("later_digest_date"):
             later += 1
     return by, later
+
+
+def summarize_truncation(rows: Iterable[dict]) -> Tuple[int, int]:
+    """ok の行のうち、途中で切れている可能性があるファイルの数と、そのうち代替リンクがあるものの数。"""
+    flagged = [r for r in rows if r.get("status") == "ok" and r.get("possibly_truncated")]
+    return len(flagged), sum(1 for r in flagged if r.get("alt_archive_url"))
 
 
 def parse_capture_before(s: Optional[str]) -> str:
@@ -1328,6 +1396,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         info("保存履歴の digest（ファイル単位。取得済みの比較可能な履歴での判定）: "
              + ", ".join(f"{k}={by_int[k]}" for k in INTEGRITY_ORDER if k in by_int))
         info(f"採用した保存版より後に、別の digest の保存を観測したファイル: {later} 件")
+        n_trunc, n_alt = summarize_truncation(out_rows)
+        info(f"採用した保存版が、digest の違う保存版より小さいファイル（途中で切れている可能性）: "
+             f"{n_trunc} 件（うち、{'基準日時より前に' if before else ''}大きい保存版へのリンクを出せるもの "
+             f"{n_alt} 件）")
     if licenses is not None:
         by_lic, ok_cc = summarize_licenses(out_rows)
         info("ライセンス（アイテム単位）: "

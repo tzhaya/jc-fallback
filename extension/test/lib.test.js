@@ -84,6 +84,7 @@ test("latestFileCaptures は length 不正を除き、ファイルごとに最�
   assert.deepEqual(Object.keys(r).sort(), ["a b.pdf", "broken.pdf", "gars-5_ja.pdf"]);
   assert.deepEqual(r["gars-5_ja.pdf"], {
     status: "ok", timestamp: "20260101000000", original: "http://jircas.repo.nii.ac.jp/record/2000885/files/gars-5_ja.pdf", n: 2,
+    possiblyTruncated: false, alt: null,
   });
   assert.deepEqual(r["broken.pdf"], { status: "invalid" });
 });
@@ -101,6 +102,7 @@ test("cdxQueryUrl と archiveUrl", () => {
   assert.equal(q.origin + q.pathname, "https://web.archive.org/cdx/search/cdx");
   assert.equal(q.searchParams.get("url"), "jircas.repo.nii.ac.jp/record/2000885/files/");
   assert.equal(q.searchParams.get("matchType"), "prefix");
+  assert.equal(q.searchParams.get("fl"), "timestamp,original,statuscode,length,digest");
   assert.equal(new URL(W.cdxQueryUrl("landing", HOST, "2000879")).searchParams.get("url"), "jircas.repo.nii.ac.jp/records/2000879");
   const f = "https://jircas.repo.nii.ac.jp/record/2000885/files/gars-5_ja.pdf";
   assert.equal(W.archiveUrl(f, "20250722192940", true), "https://web.archive.org/web/20250722192940id_/" + f);
@@ -147,4 +149,65 @@ test("独自ドメインの JAIRO Cloud は一覧にあるものだけを対象�
   // 一覧は小文字で、重複が無い
   assert.equal(new Set(W.CUSTOM_HOSTS).size, W.CUSTOM_HOSTS.length);
   for (const h of W.CUSTOM_HOSTS) assert.equal(h, h.toLowerCase());
+});
+
+/* ---- 途中で切れている可能性（Issue #7）。wb_fulltext_csv.py のテストと同じ入力で確かめる ---- */
+
+const DIG_A = "LIMIPSTYP2V6M7NO6TR4S42OIEP7QPKP";
+const DIG_B = "VVFNXLLVFCO7OEK53VKCEKDYGBPX27VQ";
+const DIG_C = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2";
+const NOT_TRUNC = { possiblyTruncated: false, alt: null };
+
+function dcap(ts, digest, length, name = "a.pdf") {
+  return { timestamp: ts, original: "https://" + HOST + "/record/1/files/" + name, statuscode: "200", length, digest };
+}
+function file(rows) {
+  const r = W.latestFileCaptures(rows, HOST, "1")["a.pdf"];
+  return { possiblyTruncated: r.possiblyTruncated, alt: r.alt && r.alt.timestamp, timestamp: r.timestamp };
+}
+
+test("normalizeDigest は Python と同じ規則で正規化する", () => {
+  assert.equal(W.normalizeDigest(DIG_A), DIG_A);
+  assert.equal(W.normalizeDigest(" " + DIG_A.toLowerCase() + " "), DIG_A);
+  for (const prefix of ["sha1:", "SHA1:", "Sha1:"]) assert.equal(W.normalizeDigest(prefix + DIG_A), DIG_A);
+  for (const bad of [null, undefined, "", "-", DIG_A.slice(0, 31), DIG_A + "A", "0".repeat(32), "1".repeat(32), DIG_A.slice(0, 31) + "8"]) {
+    assert.equal(W.normalizeDigest(bad), "", String(bad));
+  }
+});
+
+test("latestFileCaptures は、採用版が digest の違う版より小さいと possiblyTruncated にする", () => {
+  // 採用版（新しい A）が古い B より小さい。採用は変えず、代替版は B
+  const rows = [dcap("20250101000000", DIG_B, "200"), dcap("20260101000000", DIG_A, "50")];
+  assert.deepEqual(file(rows), { possiblyTruncated: true, alt: "20250101000000", timestamp: "20260101000000" });
+  const r = W.latestFileCaptures(rows, HOST, "1")["a.pdf"];
+  assert.equal(W.archiveUrl(r.alt.original, r.alt.timestamp, true),
+    "https://web.archive.org/web/20250101000000id_/https://" + HOST + "/record/1/files/a.pdf");
+});
+
+test("latestFileCaptures は、条件に当たらなければ possiblyTruncated にしない", () => {
+  const cases = [
+    [dcap("20250101000000", DIG_B, "50"), dcap("20260101000000", DIG_A, "200")], // 採用版の方が大きい
+    [dcap("20250101000000", DIG_A, "200"), dcap("20260101000000", DIG_A, "50")], // digest が 1 種類
+    [dcap("20250101000000", DIG_B, "200"), dcap("20260101000000", "-", "50")], // 採用版の digest が欠損
+    [dcap("20250101000000", DIG_B, "200"), dcap("20260101000000", DIG_A, "")], // 採用版の length が空
+    [dcap("20250101000000", DIG_B, ""), dcap("20250201000000", "", "900"), dcap("20260101000000", DIG_A, "50")], // 比べない相手
+    [dcap("20250101000000", DIG_B, "-900"), dcap("20260101000000", DIG_A, "50")], // length 不正は無効
+  ];
+  for (const rows of cases) {
+    const r = W.latestFileCaptures(rows, HOST, "1")["a.pdf"];
+    assert.deepEqual({ possiblyTruncated: r.possiblyTruncated, alt: r.alt }, NOT_TRUNC, JSON.stringify(rows));
+  }
+  // digest の列が無い（古い照会の結果）
+  const old = W.latestFileCaptures([{ timestamp: "20250101000000", original: "https://" + HOST + "/record/1/files/a.pdf", statuscode: "200", length: "9" }], HOST, "1");
+  assert.deepEqual({ possiblyTruncated: old["a.pdf"].possiblyTruncated, alt: old["a.pdf"].alt }, NOT_TRUNC);
+});
+
+test("latestFileCaptures の代替版は length 最大、同じなら新しいもの", () => {
+  assert.equal(file([dcap("20250101000000", DIG_B, "200"), dcap("20250301000000", DIG_B, "200"),
+    dcap("20260101000000", DIG_A, "50")]).alt, "20250301000000");
+  assert.equal(file([dcap("20250101000000", DIG_C, "900"), dcap("20250301000000", DIG_B, "300"),
+    dcap("20260101000000", DIG_A, "50")]).alt, "20250101000000");
+  // 採用版と同じ digest の大きい版は比較対象にしない
+  assert.equal(file([dcap("20250101000000", DIG_A, "900"), dcap("20250301000000", DIG_B, "60"),
+    dcap("20260101000000", DIG_A, "50")]).alt, "20250301000000");
 });

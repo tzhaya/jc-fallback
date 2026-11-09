@@ -1002,9 +1002,11 @@ def test_summarize_integrity():
 
 def test_digest_columns_are_appended_at_end():
     cols = w.CSV_COLUMNS
-    assert cols[-5:] == ["capture_digest", "digest_variants", "integrity_status",
-                         "digest_first_seen", "later_digest_date"]
-    assert cols.index("license_source_url") == len(cols) - 6  # 既存の列の位置は変わらない
+    assert cols[-9:-4] == ["capture_digest", "digest_variants", "integrity_status",
+                           "digest_first_seen", "later_digest_date"]
+    assert cols.index("license_source_url") == len(cols) - 10  # 既存の列の位置は変わらない
+    assert cols[-4:] == ["possibly_truncated", "larger_capture_date", "alt_capture_date",
+                         "alt_archive_url"]  # Issue #7 の列は末尾
     assert "digest" in w.CDX_FIELDS and w.CDX_QUERY["filter"] == "statuscode:200"
 
 
@@ -1108,6 +1110,117 @@ def test_capture_before_option_precedence():
     assert a.capture_before == "20261028000000"  # 下位の不正値は CLI で上書きできる
     assert _exits(lambda: _opts(["--host", "h", "--capture-before", "2026/10/28"])) == 2
     assert _exits(lambda: _opts(["--host", "h"], {}, "WB_CAPTURE_BEFORE=bad\n")) == 2
+
+# ---- 途中で切れている可能性（Issue #7） ----
+
+DIG_C = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2"
+TRUNC_EMPTY = {"possibly_truncated": "", "larger_capture_date": "", "alt_capture_date": "",
+               "alt_archive_url": ""}
+
+
+def _trunc(f):
+    return {k: f[k] for k in w.TRUNCATION_COLUMNS}
+
+
+def test_length_int():
+    assert w.length_int({"length": "100"}) == 100 and w.length_int({"length": " 7 "}) == 7
+    for bad in ({}, {"length": ""}, {"length": "-"}, {"length": None}, {"length": "1.5"}):
+        assert w.length_int(bad) is None, bad
+
+
+def test_truncation_adopted_smaller_than_other_digest():
+    # 採用版（新しい A）が、古い B より小さい → 警告。上限なしなら代替版 = 全期間の最大
+    f = _one([_dcap("20250101000000", DIG_B, length="200"), _dcap("20260101000000", DIG_A, length="50")])
+    assert f["adopted"]["timestamp"] == "20260101000000"  # 採用は変えない
+    assert _trunc(f) == {
+        "possibly_truncated": "1", "larger_capture_date": "2025-01-01",
+        "alt_capture_date": "2025-01-01",
+        "alt_archive_url": w.archive_url("20250101000000", "https://h/record/1/files/a.pdf")}
+
+
+def test_truncation_mixed_cutoff_keeps_alt_before_cutoff():
+    # 計画レビューの例: 上限内の B=100、採用版 A=50、上限後の B=200
+    rows = [_dcap("20250101000000", DIG_B, length="100"), _dcap("20260101000000", DIG_A, length="50"),
+            _dcap("20261101000000", DIG_B, length="200")]
+    f = _one(rows, "20261028000000")
+    assert f["adopted"]["timestamp"] == "20260101000000"
+    assert f["possibly_truncated"] == "1" and f["larger_capture_date"] == "2026-11-01"
+    assert f["alt_capture_date"] == "2025-01-01"
+    assert f["alt_archive_url"].startswith("https://web.archive.org/web/20250101000000id_/")
+
+
+def test_truncation_larger_only_after_cutoff():
+    rows = [_dcap("20260101000000", DIG_A, length="50"), _dcap("20261101000000", DIG_B, length="200")]
+    f = _one(rows, "20261028000000")
+    assert _trunc(f) == {**TRUNC_EMPTY, "possibly_truncated": "1", "larger_capture_date": "2026-11-01"}
+    # 上限ちょうどの版は代替にしない（未満だけ）
+    rows = [_dcap("20260101000000", DIG_A, length="50"), _dcap("20261028000000", DIG_B, length="200")]
+    f = _one(rows, "20261028000000")
+    assert f["possibly_truncated"] == "1" and f["alt_archive_url"] == ""
+    assert f["larger_capture_date"] == "2026-10-28"
+
+
+def test_truncation_not_flagged():
+    # 採用版の方が大きい（正規の差し替えで大きくなった場合など）
+    assert _trunc(_one([_dcap("20250101000000", DIG_B, length="50"),
+                        _dcap("20260101000000", DIG_A, length="200")])) == TRUNC_EMPTY
+    # digest が 1 種類なら、長さが違っても警告しない
+    assert _trunc(_one([_dcap("20250101000000", DIG_A, length="200"),
+                        _dcap("20260101000000", DIG_A, length="50")])) == TRUNC_EMPTY
+    # 採用版の digest が欠損
+    assert _trunc(_one([_dcap("20250101000000", DIG_B, length="200"),
+                        _dcap("20260101000000", "-", length="50")])) == TRUNC_EMPTY
+    # 採用版の length が空（has_valid_length は有効とみなす）
+    assert _trunc(_one([_dcap("20250101000000", DIG_B, length="200"),
+                        _dcap("20260101000000", DIG_A, length="")])) == TRUNC_EMPTY
+    # 比較相手の length が空、または digest が欠損 → 比べない
+    assert _trunc(_one([_dcap("20250101000000", DIG_B, length=""),
+                        _dcap("20250201000000", "", length="900"),
+                        _dcap("20260101000000", DIG_A, length="50")])) == TRUNC_EMPTY
+    # 採用版が無い（上限より後にしか無い）
+    assert _trunc(_one([_dcap("20261101000000", DIG_A, length="50"),
+                        _dcap("20261201000000", DIG_B, length="200")], "20261028000000")) == TRUNC_EMPTY
+
+
+def test_truncation_picks_largest_then_newest():
+    # 同じ長さが 2 件 → 新しい方
+    f = _one([_dcap("20250101000000", DIG_B, length="200"), _dcap("20250301000000", DIG_B, length="200"),
+              _dcap("20260101000000", DIG_A, length="50")])
+    assert f["alt_capture_date"] == "2025-03-01" and f["larger_capture_date"] == "2025-03-01"
+    # digest が 3 種類 → 最大の length
+    f = _one([_dcap("20250101000000", DIG_C, length="900"), _dcap("20250301000000", DIG_B, length="300"),
+              _dcap("20260101000000", DIG_A, length="50")])
+    assert f["integrity_status"] == "changed" and f["digest_variants"] == 3
+    assert f["alt_capture_date"] == "2025-01-01"
+    # 採用版と同じ digest の大きい版は、比較対象にしない
+    f = _one([_dcap("20250101000000", DIG_A, length="900"), _dcap("20250301000000", DIG_B, length="60"),
+              _dcap("20260101000000", DIG_A, length="50")])
+    assert f["alt_capture_date"] == "2025-03-01"
+
+
+def test_truncation_columns_in_build_rows():
+    _, entries = w.parse_atom(ATOM_FIXTURE)
+    before = "20261028000000"
+    rows = w.build_rows(entries[0], "1", [
+        _dcap("20250101000000", DIG_B, "a.pdf", length="100"),
+        _dcap("20260101000000", DIG_A, "a.pdf", length="50"),
+        _dcap("20261101000000", DIG_A, "b.pdf", length="50"),
+        _dcap("20261201000000", DIG_B, "b.pdf", length="900")], before)
+    a, b = rows
+    assert a["status"] == "ok" and a["possibly_truncated"] == "1"
+    assert a["alt_archive_url"] == w.archive_url("20250101000000", "https://h/record/1/files/a.pdf")
+    assert a["archive_url"].startswith("https://web.archive.org/web/20260101000000id_/")  # 採用は不変
+    assert b["status"] == "after_cutoff"
+    assert all(not b.get(k) for k in w.TRUNCATION_COLUMNS)
+
+
+def test_summarize_truncation():
+    rows = [{"status": "ok", "possibly_truncated": "1", "alt_archive_url": "https://x"},
+            {"status": "ok", "possibly_truncated": "1", "alt_archive_url": ""},
+            {"status": "ok", "possibly_truncated": ""},
+            {"status": "after_cutoff", "possibly_truncated": "1", "alt_archive_url": "https://x"},
+            {"status": "no_capture"}]
+    assert w.summarize_truncation(rows) == (2, 1)
 
 
 def _run_all():
