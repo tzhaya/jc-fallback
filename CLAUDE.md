@@ -32,6 +32,7 @@
 - ライセンスの判定（`license_for_file`）: 権利情報の URI か本文の CC URL、またはファイルの `licensetype`（license_0〜12）を CC とし、**NC/ND 付きも CC と同じ扱い**（利用者の判断）。CC の種類が食い違う、または `license_no` なのに権利情報が CC のものは `check`（要確認）。export JSON の取得結果は `export_json.jsonl` にキャッシュし、CDX に新しい capture が現れたら取り直す。最新の capture が通信エラーで取れず古い capture で判定したときは、`latest` に使った capture の timestamp を入れ、次回の実行で最新を取り直す（PR #1 の Codex レビューで指摘）。
 - `extension/`: App 2。`lib.js`（DOM に依存しない判定ロジック。content script・Service Worker・Node テストで共有）、`content.js`（IRDB の表を th の見出し〈ファイル/File、権利情報/Rights、資源識別子/Identifier、アクセス権/Accessrights〉で読み、パネルを表の直前に挿入）、`background.js`（CDX 照会とキャッシュ）、`content.css`、`manifest.json`。テストは `node --test extension/test/*.test.js`（Node 標準のみ。DOM 部分は対象外で、IRDB の実ページ 9 件にスクリプトを注入して確認した）。
 - `test_fixtures/`: ビューアの手動確認用 CSV（`viewer_integrity.csv` はスナップショットの履歴の判定、`after_cutoff`、途中で切れている可能性〈Issue #7〉、`no_capture` / `no_pdf` の表示ラベル〈Issue #9〉を含む、`viewer_legacy.csv` はスナップショットの履歴の 5 列と Issue #7 の 4 列の無い旧形式）。Python のテストからは使わない。内容は同フォルダの README.md。
+- `make_public_csv.py`（2026-11-13）: 一般公開する CSV（`docs/sample/result*.csv`）から、CC と判定できない行の `archive_url` と `alt_archive_url` を空にする。ビューアは CC 以外のリンクを隠すが、CSV を直接開くと全件の PDF URL が分かるため（Internet Archive の利用条件の検証で指摘）。公開用 CSV を出力し直したら、必ず通す。ビューアの「CC ライセンスを確認できないため…」の注記は、`archive_url` が空でも出るよう `status === "ok"` で判定する。README と `docs/index.html` には Internet Archive への謝辞と、拡張機能のプライバシー（URL と IP アドレスが IA に渡る）を載せ、`manifest.json` の `description` にも書いた。
 - `test_wb_fulltext_csv.py`: オフラインテスト。`python3 test_wb_fulltext_csv.py` で全 `test_*` を実行（pytest は使わない）。
 
 ## 確認済みの事実
