@@ -466,7 +466,7 @@ footer p { margin: 0 0 4px; }
     var items = [[o.archive_url, "Wayback の PDF"], [o.record_url, "リポジトリ詳細"], [o.irdb_url, "IRDB 詳細"]];
     if (PUBLIC && !isCc) items = items.slice(1);
     if (!PUBLIC) items.push([o.license_source_url, "ライセンスの確認元"]);
-    if (PUBLIC && !isCc && o.archive_url) {
+    if (PUBLIC && !isCc && o.status === "ok") {
       var n = document.createElement("span");
       n.className = "nolink";
       n.textContent = "CC ライセンスを確認できないため、PDF へのリンクは表示しません";

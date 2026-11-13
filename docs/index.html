@@ -212,6 +212,7 @@ footer p { margin: 0 0 4px; }
     <h2>ご注意</h2>
     <div class="notice">
       <ul>
+        <li>このツールは、<a href="https://archive.org/">Internet Archive</a> の Wayback Machine（CDX API とアーカイブ版）を利用しています。Internet Archive の提供するサービスと、サイトのアーカイブを続けている運営者に感謝します。利用にあたっては、<a href="https://archive.org/about/terms.php">Internet Archive の利用条件</a>に従ってください。このツールの結果を研究成果として公表するときは、Internet Archive を資料として参考文献に挙げてください。</li>
         <li>元の機関リポジトリにあるすべての PDF ファイルが、Wayback Machine にアーカイブされているとは限りません。アーカイブされるのは、クローラが到達したものだけです。</li>
         <li>ランディングページが Wayback Machine にアーカイブされていても、PDF ファイルはアーカイブされていないことがあります。</li>
         <li>新しく登録されたアイテムほど、アーカイブされていない傾向があります。国際農研のリポジトリ（<code>jircas.repo.nii.ac.jp</code>）で 2026-11-07 に確認したところ、全体では 82% のアイテムが Wayback Machine にアーカイブされていました。レコード番号が 2000900 未満のアイテムでは 95% がアーカイブされていたのに対し、2000900 以上では 42% でした。</li>
@@ -359,6 +360,7 @@ WB_CAPTURE_BEFORE=2026-10-28</code></pre>
       <li>問い合わせには、1件あたり数十秒かかることがあります。問い合わせに失敗したときは、最新のスナップショットへのリンクを表示します（開けない場合があります）。</li>
       <li>最新のスナップショットより <code>length</code> が大きく、digest 値の違うスナップショットがあるときは、アーカイブ版が途中で切れている可能性があるとして、本文 PDF のリンクの下に注意と、別のアーカイブ版（いちばん大きいもの）へのリンクを表示します。判定は CSV 出力ツールの <code>possibly_truncated</code> と同じです。</li>
       <li>問い合わせの結果は、6時間ブラウザに保存します。</li>
+      <li><strong>プライバシー</strong>：閲覧中の資料のリポジトリ上の URL（本文ファイルとランディングページ）が、Internet Archive（<code>web.archive.org</code>）に送られます。Internet Archive は、あなたの IP アドレスを受け取ります。送られた情報の扱いは、<a href="https://archive.org/about/privacy.php">Internet Archive のプライバシーポリシー</a>に従います。この拡張機能は、IRDB と Internet Archive 以外にはデータを送らず、個人情報を収集しません。</li>
     </ul>
 
     <h3>インストール（パッケージ化されていない拡張機能として読み込む）</h3>

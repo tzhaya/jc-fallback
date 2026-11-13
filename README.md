@@ -9,6 +9,8 @@ JAIRO Cloud が停止している間の応急手段として作成した、機�
 
 ## ご注意
 
+- このツールは、[Internet Archive](https://archive.org/) の Wayback Machine（CDX API とアーカイブ版）を利用しています。Internet Archive の提供するサービスと、サイトのアーカイブを続けている運営者に感謝します。利用にあたっては、[Internet Archive の利用条件](https://archive.org/about/terms.php)に従ってください。このツールの結果を研究成果として公表するときは、Internet Archive を資料として参考文献に挙げてください。
+
 - 元の機関リポジトリにあるすべての PDF ファイルが、Wayback Machine にアーカイブされているとは限りません。アーカイブされるのは、クローラが到達したものだけです。
 - ランディングページが Wayback Machine にアーカイブされていても、PDF ファイルはアーカイブされていないことがあります。
 - 新しく登録されたアイテムほど、アーカイブされていない傾向があります。国際農研のリポジトリ（`jircas.repo.nii.ac.jp`）で 2026-11-07 に確認したところ、全体では 82% のアイテムが Wayback Machine にアーカイブされていました。レコード番号が 2000900 未満のアイテムでは 95% がアーカイブされていたのに対し、2000900 以上では 42% でした。
@@ -30,6 +32,7 @@ JAIRO Cloud が停止している間の応急手段として作成した、機�
 | `test_wb_fulltext_csv.py` | オフラインテスト（ネットワーク不使用） |
 | `viewer_staff.html` | 担当者向けの閲覧ページ（CSV を表示し、入力した文字列で絞り込む静的ページ。すべての PDF へのリンクと、ライセンスの判定結果を表示する） |
 | `result.csv` | 出力例（閲覧ページが読み込む既定のファイル名）。国際農研のリポジトリのデータ |
+| `make_public_csv.py` | 一般公開用の CSV を作る。CC と判定できない行の `archive_url` と `alt_archive_url` を空にする（`python3 make_public_csv.py 入力.csv [出力.csv]`） |
 | `extension/` | IRDB の詳細ページに、Wayback Machine のアーカイブ版へのリンクを表示する Chrome / Edge 用の拡張機能（後述） |
 | `docs/` | GitHub Pages の公開内容（`index.html` と、`sample/` にある一般公開向けのサンプル `viewer_public.html`） |
 
@@ -206,6 +209,7 @@ CSV を作らずに使えるので、登録件数が多く、CSV の作成に時
 - 問い合わせには、1件あたり数十秒かかることがあります。問い合わせに失敗したときは、最新のスナップショットへのリンクを表示します（開けない場合があります）。
 - 最新のスナップショットより `length` が大きく、digest 値の違うスナップショットがあるときは、アーカイブ版が途中で切れている可能性があるとして、本文 PDF のリンクの下に注意と、別のアーカイブ版（いちばん大きいもの）へのリンクを表示します。判定は CSV 出力ツールの `possibly_truncated` と同じです。
 - 問い合わせの結果は、6時間ブラウザに保存します。
+- **プライバシー**：閲覧中の資料のリポジトリ上の URL（本文ファイルとランディングページ）が、Internet Archive（`web.archive.org`）に送られます。Internet Archive は、あなたの IP アドレスを受け取ります。送られた情報の扱いは、[Internet Archive のプライバシーポリシー](https://archive.org/about/privacy.php)に従います。この拡張機能は、IRDB と Internet Archive 以外にはデータを送らず、個人情報を収集しません。
 
 ### インストール（パッケージ化されていない拡張機能として読み込む）
 

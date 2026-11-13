@@ -1223,6 +1223,19 @@ def test_summarize_truncation():
     assert w.summarize_truncation(rows) == (2, 1)
 
 
+def test_make_public_csv():
+    import make_public_csv as m
+    rows = [{"license_status": "cc", "archive_url": "u1", "alt_archive_url": "a1"},
+            {"license_status": "no_rights", "archive_url": "u2", "alt_archive_url": "a2"},
+            {"license_status": "check", "archive_url": "u3", "alt_archive_url": ""},
+            {"license_status": "", "archive_url": "u4"}]
+    out = m.sanitize_rows(rows)
+    assert out[0] == rows[0]
+    assert out[1]["archive_url"] == "" and out[1]["alt_archive_url"] == ""
+    assert out[2]["archive_url"] == "" and out[3]["archive_url"] == ""
+    assert rows[1]["archive_url"] == "u2"  # 入力は変えない
+
+
 def _run_all():
     failed = 0
     for name, fn in sorted(globals().items()):
