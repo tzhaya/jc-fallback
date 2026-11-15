@@ -13,5 +13,5 @@ result_before_*.csv
 .env
 .claude/settings.json
 
-docs/sample/results_naro.csv
 docs/sample/viewer_public_naro.html
+docs/sample/result_naro.csv
